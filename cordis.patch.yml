@@ -1,0 +1,6 @@
+- insert:
+    - id: dsh-flow
+      name: dsh-flow
+      config:
+        maxParallelNodes: 4
+        defaultTimeoutMs: 30000

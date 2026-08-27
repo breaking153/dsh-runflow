@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "types": ["react", "react-dom", "vite/client"]
+  },
+  "include": ["src/client", "src/contracts.ts", "vite.config.ts", "tests/**/*.client.spec.tsx"],
+  "exclude": []
+}

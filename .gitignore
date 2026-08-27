@@ -1,0 +1,10 @@
+node_modules/
+lib/
+preview-dist/
+coverage/
+.playwright-cli/
+*.log
+.DS_Store
+.ua/tmp/
+.ua/intermediate/
+.ua
