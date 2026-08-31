@@ -8,3 +8,5 @@ coverage/
 .ua/tmp/
 .ua/intermediate/
 .ua
+output/runflow/
+data/runflow/

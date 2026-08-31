@@ -1,7 +1,10 @@
-# dsh-flow script plugin
+# dsh-runflow Script executor
 
-此目录本身是一个合法 Cordis 插件：`index.ts` 导出 `name`、`inject`、`apply` 和默认 plugin 对象，由 dsh-flow Host 入口通过 `ctx.plugin(scriptPlugin)` 加载。
+此目录由合法 Cordis `dsh-runflow-script` 子插件管理，并同时提供两种执行边界：
 
-它只负责把 Workflow JavaScript 节点适配到 Harness 的保留工具 `run_code`。用户代码不会作为 Cordis plugin source 直接 eval，也不会得到 `Context`；可见能力由父 Agent 的 Code Mode、ToolRuntime scope 与策略决定。
+- `script.javascript`：通过当前 Agent scope 的 DSH `run_code` 隔离执行，不使用 `eval`，程序只能访问 `input`、`inputs`、`config` 和只读 `runflow`。
+- `*.script.ts|mts|js|mjs`：可信 Host Script Cordis 子插件，可通过 `defineRunFlowScriptPlugin()` 直接使用带 WebStorm 类型补全的 `ctx`。
 
-异步协议由 `FlowScriptChannel` 管理。提交者拥有底层 AbortSignal，其他消费者通过 requestId 等待终态；等待者取消不会破坏正在运行的请求。
+`FlowScriptChannel` 使用 requestId 管理 `queued → running → success | error | cancelled`，终态结果包含 lossless JSON、日志、结构化错误、timing、language 与 agentId。目录监听会在文件保存后动态卸载并重新加载对应 Cordis Fiber。
+
+需要隔离、审批和工具策略时使用 `run_code`；确实需要 `ctx.tools`、`ctx.agents`、`ctx.llm` 等 Host 能力时，使用可信文件插件。模板位于 `_templates/agent-count.script.ts`。

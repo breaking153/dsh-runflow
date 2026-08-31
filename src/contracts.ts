@@ -2,6 +2,41 @@ export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
 export type JsonObject = { [key: string]: JsonValue }
 
+export type WorkflowPortType = 'any' | 'json' | 'text' | 'number' | 'boolean' | 'file' | 'files' | 'image' | 'audio' | 'table' | 'error'
+
+export interface WorkflowPortDescriptor {
+  id: string
+  label?: string
+  type: WorkflowPortType
+  description?: string
+  required?: boolean
+  multiple?: boolean
+}
+
+/** Explicit envelope used when a node publishes more than one named output. */
+export type NodeOutputEnvelope = {
+  $runflow: 'port-outputs'
+  outputs: JsonObject
+}
+
+export interface NodeExecutionLogEntry {
+  timestamp: string
+  level: 'debug' | 'info' | 'warn' | 'error'
+  message: string
+  data?: JsonValue
+}
+
+export interface ExecutionArtifact {
+  kind: 'input' | 'output' | 'intermediate' | 'logs' | 'error' | 'manifest'
+  label: string
+  path: string
+  nodeId?: string
+  portId?: string
+  mediaType: string
+  bytes?: number
+  preview?: string
+}
+
 export interface WorkflowPosition {
   x: number
   y: number
@@ -31,8 +66,12 @@ export interface WorkflowDefinition {
   version: number
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
+  outputDir?: string
   createdAt?: string
   updatedAt?: string
+  published?: boolean
+  publishedVersion?: number
+  publishedAt?: string
 }
 
 export type ExecutionStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'CANCELLED'
@@ -42,8 +81,12 @@ export interface NodeExecutionRecord {
   nodeId: string
   status: NodeExecutionStatus
   input?: JsonValue
+  inputPorts?: JsonObject
   output?: JsonValue
+  outputPorts?: JsonObject
   error?: string
+  logs?: NodeExecutionLogEntry[]
+  artifacts?: ExecutionArtifact[]
   startedAt?: string
   finishedAt?: string
   durationMs?: number
@@ -58,6 +101,8 @@ export interface WorkflowExecution {
   trigger: string
   input?: JsonValue
   output?: JsonValue
+  outputDir?: string
+  artifacts?: ExecutionArtifact[]
   error?: string
   startedAt?: string
   finishedAt?: string
@@ -76,6 +121,8 @@ export interface WorkflowNodeDescriptor {
   configSchema?: JsonObject
   inputSchema?: JsonObject
   outputSchema?: JsonObject
+  inputs?: WorkflowPortDescriptor[]
+  outputs?: WorkflowPortDescriptor[]
   available?: boolean
 }
 
@@ -86,20 +133,28 @@ export interface NodeExecutionContext {
   workflow: WorkflowDefinition
   node: WorkflowNode
   input: JsonValue
+  inputs: Readonly<JsonObject>
   vars: Readonly<JsonObject>
   signal: AbortSignal
-  log(message: string, data?: JsonValue): void
+  outputDir?: string
+  intermediateDir?: string
+  log(message: string, data?: JsonValue, level?: NodeExecutionLogEntry['level']): void
+  writeIntermediate(label: string, value: JsonValue, portId?: string): Promise<ExecutionArtifact>
 }
 
 export interface WorkflowNodeDefinition extends WorkflowNodeDescriptor {
-  execute(context: NodeExecutionContext): Promise<JsonValue>
+  execute(context: NodeExecutionContext): Promise<JsonValue | NodeOutputEnvelope>
 }
 
 export interface ExecuteWorkflowOptions {
+  /** Stable id allocated by a Host start call before execution begins. */
+  executionId?: string
   trigger?: string
   input?: JsonValue
   /** Live DSH Agent whose scoped tools and delegation authority own this run. */
   agentId?: string
+  /** Per-run base directory. A workflow and then plugin default are used when omitted. */
+  outputDir?: string
   signal?: AbortSignal
 }
 
@@ -139,10 +194,21 @@ export interface FlowConfig {
   apiPrefix?: string
   maxParallelNodes?: number
   defaultTimeoutMs?: number
+  /** Defaults to ~/.dsh_agent_workflow/output. */
+  outputDir?: string
+  nodesDir?: string
+  scriptsDir?: string
+  /** Defaults to ~/.dsh_agent_workflow/data/workflows. */
+  workflowsDir?: string
+  /** Directory containing workspace.json; defaults to ~/.dsh_agent_workflow/data. */
+  storageDir?: string
+  watchFiles?: boolean
+  enableAuthoringTools?: boolean
+  authoringPresetId?: string
 }
 
 export interface WorkflowValidationIssue {
-  code: 'DUPLICATE_NODE' | 'MISSING_NODE' | 'SELF_EDGE' | 'CYCLE' | 'EMPTY_WORKFLOW'
+  code: 'DUPLICATE_NODE' | 'MISSING_NODE' | 'SELF_EDGE' | 'CYCLE' | 'EMPTY_WORKFLOW' | 'UNKNOWN_PORT' | 'PORT_TYPE_MISMATCH' | 'PORT_CARDINALITY'
   message: string
   nodeId?: string
 }

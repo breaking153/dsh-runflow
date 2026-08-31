@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -8,6 +11,7 @@ import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { ResolvedSubagentStartRequest, SubagentProvider } from '@deepseek-ai/dsh-subagent'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
 import { describe, expect, it } from 'vitest'
 import * as flowPlugin from '../src/index.ts'
 
@@ -40,8 +44,9 @@ function fixtureAgent(ctx: Context): Agent {
   }
 }
 
-describe('dsh-flow Cordis composition', () => {
+describe('dsh-runflow Cordis composition', () => {
   it('loads the script directory as a child Cordis plugin', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-runflow-composition-'))
     const ctx = new Context()
     new AgentRegistry(ctx)
     new LlmRuntime(ctx)
@@ -49,7 +54,12 @@ describe('dsh-flow Cordis composition', () => {
     new SystemPrompt(ctx, {})
     const runtime = new FixtureCodeRuntime(ctx)
     new ToolRuntime(ctx, { mode: 'code' })
-    await ctx.plugin(flowPlugin)
+    new TypertRegistry(ctx)
+    await ctx.plugin(flowPlugin, {
+      outputDir: join(root, 'output'),
+      storageDir: join(root, 'workspace'),
+      workflowsDir: join(root, 'workflows'),
+    })
 
     expect(ctx.flow.listNodes()).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'dsh.agent', available: true }),
@@ -74,7 +84,8 @@ describe('dsh-flow Cordis composition', () => {
       logs: ['runtime log'],
       runtime: expect.objectContaining({ transport: 'run_code', language: 'typescript' }),
     }))
-    expect(runtime.lastRequest?.program).toContain('const input = JSON.parse')
+    expect(runtime.lastRequest?.program).toContain('const __runflow = JSON.parse')
+    expect(runtime.lastRequest?.program).toContain('const inputs = __runflow.inputs')
 
     let captured: ResolvedSubagentStartRequest | undefined
     let disposed = false
@@ -132,5 +143,7 @@ describe('dsh-flow Cordis composition', () => {
     expect(captured?.maxDepth).toBe(2)
     expect(captured?.persona).toBe('Review precisely.')
     expect(disposed).toBe(true)
+    await ctx.fiber.dispose()
+    await rm(root, { recursive: true, force: true })
   })
 })

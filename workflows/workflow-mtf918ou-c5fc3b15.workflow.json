@@ -1,0 +1,21 @@
+{
+  "id": "workflow-mtf918ou",
+  "name": "My workflow",
+  "version": 1,
+  "nodes": [
+    {
+      "id": "manual-mtf918ou",
+      "type": "trigger.manual",
+      "name": "Manual Trigger",
+      "config": {},
+      "position": {
+        "x": 180,
+        "y": 240
+      }
+    }
+  ],
+  "edges": [],
+  "published": false,
+  "createdAt": "2026-08-30T03:27:47.160Z",
+  "updatedAt": "2026-08-30T03:27:47.160Z"
+}

@@ -1,0 +1,20 @@
+{
+  "edges": [],
+  "published": false,
+  "name": "agent-generated-node-check",
+  "nodes": [
+    {
+      "position": {
+        "y": 280,
+        "x": 420
+      },
+      "id": "provider",
+      "type": "agent.generated-normalizer",
+      "config": {}
+    }
+  ],
+  "id": "agent-generated-node-check",
+  "version": 2,
+  "createdAt": "2026-08-30T15:07:35.122Z",
+  "updatedAt": "2026-08-30T15:08:32.410Z"
+}

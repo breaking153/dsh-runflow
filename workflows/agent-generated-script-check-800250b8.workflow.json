@@ -1,0 +1,20 @@
+{
+  "edges": [],
+  "published": false,
+  "nodes": [
+    {
+      "config": {},
+      "id": "provider",
+      "type": "agent.generated-ctx-script",
+      "position": {
+        "y": 280,
+        "x": 420
+      }
+    }
+  ],
+  "version": 2,
+  "id": "agent-generated-script-check",
+  "name": "agent-generated-script-check",
+  "createdAt": "2026-08-30T15:07:49.433Z",
+  "updatedAt": "2026-08-30T15:08:37.964Z"
+}

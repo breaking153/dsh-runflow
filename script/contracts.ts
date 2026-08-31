@@ -1,4 +1,4 @@
-import type { JsonValue } from '../src/contracts.ts'
+import type { JsonObject, JsonValue } from '../src/contracts.ts'
 
 export type FlowScriptStatus = 'queued' | 'running' | 'success' | 'error' | 'cancelled'
 
@@ -24,6 +24,10 @@ export interface FlowScriptRequest {
   description: string
   program: string
   input: JsonValue
+  inputs?: JsonObject
+  config?: JsonObject
+  outputDir?: string
+  intermediateDir?: string
   signal: AbortSignal
 }
 

@@ -1,0 +1,17 @@
+{
+  "edges": [],
+  "version": 4,
+  "nodes": [
+    {
+      "type": "demo.run-code-channel",
+      "config": {},
+      "id": "channel",
+      "name": "Run Code Channel"
+    }
+  ],
+  "id": "api-hot-script-demo",
+  "name": "API Hot Script Demo",
+  "createdAt": "2026-08-30T14:45:25.624Z",
+  "updatedAt": "2026-08-30T14:57:21.729Z",
+  "published": false
+}

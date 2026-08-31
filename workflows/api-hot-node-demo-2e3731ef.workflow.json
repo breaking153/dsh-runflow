@@ -1,0 +1,17 @@
+{
+  "nodes": [
+    {
+      "name": "Typed Output Splitter",
+      "id": "split",
+      "type": "demo.multi-output",
+      "config": {}
+    }
+  ],
+  "edges": [],
+  "name": "API Hot Node Demo",
+  "id": "api-hot-node-demo",
+  "version": 2,
+  "createdAt": "2026-08-30T14:44:55.156Z",
+  "updatedAt": "2026-08-30T14:45:14.450Z",
+  "published": false
+}

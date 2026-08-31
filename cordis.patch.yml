@@ -1,6 +1,9 @@
 - insert:
-    - id: dsh-flow
-      name: dsh-flow
+    - id: dsh-runflow
+      name: dsh-runflow
       config:
         maxParallelNodes: 4
         defaultTimeoutMs: 30000
+        watchFiles: true
+        enableAuthoringTools: true
+        authoringPresetId: cordis

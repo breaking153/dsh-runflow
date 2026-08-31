@@ -1,0 +1,84 @@
+{
+  "id": "pr-review-pipeline",
+  "name": "PR Review Pipeline - Host Demo",
+  "version": 1,
+  "nodes": [
+    {
+      "id": "manual",
+      "type": "trigger.manual",
+      "name": "Manual Trigger",
+      "config": {},
+      "position": {
+        "x": 80,
+        "y": 220
+      }
+    },
+    {
+      "id": "script",
+      "type": "script.javascript",
+      "name": "JavaScript",
+      "config": {
+        "code": "const total = input.items?.length ?? 0\nreturn { ...input, total }",
+        "timeoutMs": 5000
+      },
+      "position": {
+        "x": 390,
+        "y": 220
+      }
+    },
+    {
+      "id": "agent",
+      "type": "dsh.agent",
+      "name": "DSH Agent",
+      "config": {
+        "subagentProvider": "spawn",
+        "prompt": "Review the incoming pull request",
+        "maxDepth": 2
+      },
+      "position": {
+        "x": 700,
+        "y": 220
+      }
+    },
+    {
+      "id": "storage",
+      "type": "storage.write",
+      "name": "Storage",
+      "config": {
+        "collection": "review-results"
+      },
+      "position": {
+        "x": 1010,
+        "y": 220
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "manual-script",
+      "from": "manual",
+      "to": "script",
+      "sourcePort": "output",
+      "targetPort": "input"
+    },
+    {
+      "id": "script-agent",
+      "from": "script",
+      "to": "agent",
+      "sourcePort": "output",
+      "targetPort": "input"
+    },
+    {
+      "id": "agent-storage",
+      "from": "agent",
+      "to": "storage",
+      "sourcePort": "result",
+      "targetPort": "input"
+    }
+  ],
+  "published": true,
+  "createdAt": "2026-08-29T07:59:15.520Z",
+  "updatedAt": "2026-08-29T07:59:46.487Z",
+  "publishedVersion": 1,
+  "publishedAt": "2026-08-29T07:59:46.487Z"
+}

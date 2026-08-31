@@ -1,6 +1,14 @@
+import { createHash, randomUUID } from 'node:crypto'
+import {
+  existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, watch, writeFileSync,
+  type FSWatcher,
+} from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join, resolve } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { AgentOptions } from '@deepseek-ai/dsh-agent'
 import type { SubagentResult } from '@deepseek-ai/dsh-subagent'
+import { builtinNodeDefinitions } from '../nodes/builtins.ts'
 import type {
   ExecuteWorkflowOptions,
   FlowConfig,
@@ -10,10 +18,24 @@ import type {
   NodeExecutionContext,
   WorkflowDefinition,
   WorkflowExecution,
+  WorkflowNode,
   WorkflowNodeDefinition,
   WorkflowNodeDescriptor,
 } from './contracts.ts'
 import { executeWorkflow, validateWorkflow, WorkflowValidationError } from './engine.ts'
+import {
+  FlowNodeLibrary,
+  type NodeDraftInput,
+  type NodeLibraryEntry,
+  type NodeTestReceipt,
+} from './node-library.ts'
+import { FileExecutionOutput } from './output-store.ts'
+import {
+  RunFlowPluginSourceLibrary,
+  type RunFlowPluginSource,
+  type SaveRunFlowPluginSourceRequest,
+} from './plugin-sources.ts'
+import { resolveRunFlowRuntimePaths } from './runtime-paths.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -23,33 +45,11 @@ declare module '@deepseek-ai/cordis' {
 
 const clone = <T>(value: T): T => structuredClone(value)
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error)
+const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 function json(value: unknown): JsonValue {
   const encoded = JSON.stringify(value)
   return encoded === undefined ? null : JSON.parse(encoded) as JsonValue
-}
-
-function objectConfig(value: JsonValue | undefined): JsonObject {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value : {}
-}
-
-function readPath(value: JsonValue, path: string): JsonValue | undefined {
-  let cursor: JsonValue | undefined = value
-  for (const part of path.split('.').filter(Boolean)) {
-    if (typeof cursor !== 'object' || cursor === null || Array.isArray(cursor)) return undefined
-    cursor = cursor[part]
-  }
-  return cursor
-}
-
-function compare(left: JsonValue | undefined, operator: string, right: JsonValue | undefined): boolean {
-  switch (operator) {
-    case 'notEquals': return left !== right
-    case 'contains': return typeof left === 'string' && typeof right === 'string' && left.includes(right)
-    case 'greaterThan': return typeof left === 'number' && typeof right === 'number' && left > right
-    case 'lessThan': return typeof left === 'number' && typeof right === 'number' && left < right
-    default: return left === right
-  }
 }
 
 function configString(config: JsonObject, key: string): string | undefined {
@@ -66,7 +66,7 @@ function agentPrompt(template: string | undefined, input: JsonValue): string {
   const renderedInput = JSON.stringify(input, null, 2)
   const base = template ?? 'Process the workflow input and return a concise result.'
   if (base.includes('{{input}}')) return base.replaceAll('{{input}}', renderedInput)
-  return `${base}\n\n<workflow_input>\n${renderedInput}\n</workflow_input>`
+  return base + '\n\n<workflow_input>\n' + renderedInput + '\n</workflow_input>'
 }
 
 function assistantText(result: SubagentResult): string {
@@ -76,39 +76,131 @@ function assistantText(result: SubagentResult): string {
     .join('\n')
 }
 
+function workflowFileName(id: string): string {
+  const readable = id.replaceAll(/[^a-zA-Z0-9._-]+/g, '-').replaceAll(/^-+|-+$/g, '') || 'workflow'
+  const digest = createHash('sha256').update(id).digest('hex').slice(0, 8)
+  return readable + '-' + digest + '.workflow.json'
+}
+
+function workflowContent(definition: WorkflowDefinition): string {
+  return JSON.stringify({
+    id: definition.id,
+    name: definition.name,
+    nodes: definition.nodes,
+    edges: definition.edges,
+    outputDir: definition.outputDir ?? null,
+    published: definition.published ?? false,
+  })
+}
+
 export class FlowService extends Service {
-  private readonly nodes = new Map<string, WorkflowNodeDefinition>()
   private readonly workflows = new Map<string, WorkflowDefinition>()
   private readonly executions = new Map<string, WorkflowExecution>()
   private readonly executionOrder: string[] = []
   private readonly cancellations = new Map<string, AbortController>()
   private readonly maxParallelNodes: number
   private readonly defaultTimeoutMs: number
+  private readonly defaultOutputDir: string
+  private readonly storageFile: string
+  private readonly workflowsDir: string
+  private readonly watchFiles: boolean
+  private readonly workflowFileIds = new Map<string, string>()
+  readonly nodeLibrary: FlowNodeLibrary
+  readonly pluginSources: RunFlowPluginSourceLibrary
 
   constructor(ctx: Context, config: FlowConfig = {}) {
     super(ctx, 'flow')
+    const runtimePaths = resolveRunFlowRuntimePaths(config)
     this.maxParallelNodes = config.maxParallelNodes ?? 4
     this.defaultTimeoutMs = config.defaultTimeoutMs ?? 30_000
+    this.defaultOutputDir = runtimePaths.outputDir
+    this.storageFile = runtimePaths.workspaceFile
+    this.workflowsDir = runtimePaths.workflowsDir
+    this.watchFiles = config.watchFiles ?? true
+    this.nodeLibrary = new FlowNodeLibrary(
+      config.nodesDir ?? join(pluginRoot, 'nodes'),
+      (program, descriptor, context) => this.executeProgramNode(program, descriptor, context),
+      message => this.ctx.logger.warn(message),
+    )
+    this.pluginSources = new RunFlowPluginSourceLibrary(
+      resolve(config.nodesDir ?? join(pluginRoot, 'nodes')),
+      resolve(config.scriptsDir ?? join(pluginRoot, 'script')),
+    )
     this.installBuiltins()
+    this.loadWorkspace()
+    if (this.watchFiles) this.ctx.effect(() => this.watchWorkflowDirectory(), 'dsh-runflow: workflow file watcher')
   }
 
   registerNode(definition: WorkflowNodeDefinition): () => void {
-    if (this.nodes.has(definition.type)) throw new Error(`flow: duplicate node provider ${definition.type}`)
-    this.nodes.set(definition.type, definition)
-    const dispose = (): void => { this.nodes.delete(definition.type) }
-    this.ctx.effect(() => dispose, `flow.registerNode(${JSON.stringify(definition.type)})`)
+    const dispose = this.nodeLibrary.registerPlugin(definition)
+    this.ctx.effect(() => dispose, 'flow.registerNode(' + JSON.stringify(definition.type) + ')')
     return dispose
   }
 
   listNodes(): WorkflowNodeDescriptor[] {
-    return [...this.nodes.values()].map(({ execute: _execute, ...descriptor }) => clone(descriptor))
+    return this.nodeLibrary.list().map(entry => clone(entry.descriptor))
+  }
+
+  listNodeLibrary(): NodeLibraryEntry[] {
+    return clone(this.nodeLibrary.list())
+  }
+
+  listPluginSources(): RunFlowPluginSource[] {
+    return clone(this.pluginSources.list())
+  }
+
+  savePluginSource(request: SaveRunFlowPluginSourceRequest): RunFlowPluginSource {
+    return clone(this.pluginSources.save(request))
+  }
+
+  node(type: string): NodeLibraryEntry | undefined {
+    return clone(this.nodeLibrary.get(type))
+  }
+
+  upsertNodeDraft(input: NodeDraftInput): NodeLibraryEntry {
+    return clone(this.nodeLibrary.upsertDraft(input))
+  }
+
+  removeNodeDraft(type: string): boolean {
+    return this.nodeLibrary.removeDraft(type)
+  }
+
+  async testNodeDraft(
+    type: string,
+    options: { agentId: string; input?: JsonValue; config?: JsonObject; outputDir?: string; signal?: AbortSignal },
+  ): Promise<NodeTestReceipt> {
+    const entry = this.nodeLibrary.get(type)
+    if (entry?.source !== 'memory') throw new Error('only an in-memory node draft can be tested')
+    const definition: WorkflowDefinition = {
+      id: 'node-test-' + type,
+      name: 'Node test: ' + entry.descriptor.title,
+      version: 1,
+      nodes: [{ id: 'node-under-test', type, config: clone(options.config ?? {}) }],
+      edges: [],
+    }
+    const execution = await this.runDefinition(definition, {
+      trigger: 'node-development',
+      agentId: options.agentId,
+      input: clone(options.input ?? {}),
+      ...(options.outputDir === undefined ? {} : { outputDir: options.outputDir }),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    })
+    return clone(this.nodeLibrary.markTested(type, execution))
+  }
+
+  async commitNodeDraft(type: string): Promise<NodeLibraryEntry> {
+    return clone(await this.nodeLibrary.commit(type))
+  }
+
+  async removePersistedNode(type: string): Promise<boolean> {
+    return await this.nodeLibrary.removePersisted(type)
   }
 
   /** Read the Harness registries on every call; model catalogs are advisory and may change at runtime. */
   async runtimeCatalog(): Promise<FlowRuntimeCatalog> {
     const subagentProviders = this.ctx.subagents.list().map((id) => {
       const provider = this.ctx.subagents.getProvider(id)
-      if (provider === undefined) throw new Error(`subagent provider disappeared while listing: ${id}`)
+      if (provider === undefined) throw new Error('subagent provider disappeared while listing: ' + id)
       return {
         id,
         inheritsParentContext: provider.inheritsParentContext,
@@ -150,7 +242,7 @@ export class FlowService extends Service {
   }
 
   saveWorkflow(input: WorkflowDefinition): WorkflowDefinition {
-    const issues = validateWorkflow(input)
+    const issues = validateWorkflow(input, type => this.nodeLibrary.resolve(type))
     if (issues.length > 0) throw new WorkflowValidationError(issues)
     const current = this.workflows.get(input.id)
     const now = new Date().toISOString()
@@ -159,29 +251,105 @@ export class FlowService extends Service {
       version: current === undefined ? Math.max(1, input.version) : current.version + 1,
       createdAt: current?.createdAt ?? input.createdAt ?? now,
       updatedAt: now,
+      published: current?.published ?? input.published ?? false,
+      ...(current?.publishedVersion === undefined && input.publishedVersion === undefined ? {} : { publishedVersion: current?.publishedVersion ?? input.publishedVersion }),
+      ...(current?.publishedAt === undefined && input.publishedAt === undefined ? {} : { publishedAt: current?.publishedAt ?? input.publishedAt }),
     }
     this.workflows.set(saved.id, saved)
+    this.persistWorkflowFile(saved)
+    this.persistWorkspace()
     return clone(saved)
   }
 
+  /** Persist an incoming runnable definition only when its editable content changed. */
+  ensureWorkflow(input: WorkflowDefinition): WorkflowDefinition {
+    const current = this.workflows.get(input.id)
+    if (current !== undefined && workflowContent(current) === workflowContent(input)) return clone(current)
+    return this.saveWorkflow(input)
+  }
+
+  deleteWorkflow(id: string): boolean {
+    const removed = this.workflows.delete(id)
+    if (removed) {
+      this.removeWorkflowFile(id)
+      this.persistWorkspace()
+    }
+    return removed
+  }
+
+  setWorkflowPublished(id: string, published: boolean): WorkflowDefinition {
+    const workflow = this.requireWorkflow(id)
+    const now = new Date().toISOString()
+    const next: WorkflowDefinition = { ...workflow, published, updatedAt: now }
+    if (published) {
+      next.publishedVersion = workflow.version
+      next.publishedAt = now
+    } else {
+      delete next.publishedVersion
+      delete next.publishedAt
+    }
+    this.workflows.set(id, next)
+    this.persistWorkflowFile(next)
+    this.persistWorkspace()
+    return clone(next)
+  }
+
+  upsertWorkflowNode(workflowId: string, node: WorkflowNode): WorkflowDefinition {
+    const workflow = this.requireWorkflow(workflowId)
+    const index = workflow.nodes.findIndex(candidate => candidate.id === node.id)
+    if (index === -1) workflow.nodes.push(clone(node))
+    else workflow.nodes[index] = clone(node)
+    return this.saveWorkflow(workflow)
+  }
+
+  updateWorkflowNode(
+    workflowId: string,
+    nodeId: string,
+    patch: Partial<Omit<WorkflowNode, 'id'>>,
+  ): WorkflowDefinition {
+    const workflow = this.requireWorkflow(workflowId)
+    const index = workflow.nodes.findIndex(candidate => candidate.id === nodeId)
+    if (index === -1) throw new Error('workflow node not found: ' + nodeId)
+    const current = workflow.nodes[index]!
+    workflow.nodes[index] = {
+      ...current,
+      ...clone(patch),
+      id: current.id,
+      config: patch.config === undefined ? current.config : clone(patch.config),
+    }
+    return this.saveWorkflow(workflow)
+  }
+
+  removeWorkflowNode(workflowId: string, nodeId: string): WorkflowDefinition {
+    const workflow = this.requireWorkflow(workflowId)
+    if (!workflow.nodes.some(node => node.id === nodeId)) throw new Error('workflow node not found: ' + nodeId)
+    workflow.nodes = workflow.nodes.filter(node => node.id !== nodeId)
+    workflow.edges = workflow.edges.filter(edge => edge.from !== nodeId && edge.to !== nodeId)
+    return this.saveWorkflow(workflow)
+  }
+
   async execute(id: string, options: ExecuteWorkflowOptions = {}): Promise<WorkflowExecution> {
-    const workflow = this.workflows.get(id)
-    if (workflow === undefined) throw new Error(`Workflow not found: ${id}`)
-    const cancellation = new AbortController()
-    const relay = (): void => cancellation.abort(options.signal?.reason)
-    options.signal?.addEventListener('abort', relay, { once: true })
-    const execution = await executeWorkflow(workflow, { ...options, signal: cancellation.signal }, {
-      maxParallelNodes: this.maxParallelNodes,
-      defaultTimeoutMs: this.defaultTimeoutMs,
-      resolveNode: type => this.nodes.get(type),
-      onUpdate: snapshot => {
-        if (!this.executions.has(snapshot.id)) this.executionOrder.unshift(snapshot.id)
-        this.executions.set(snapshot.id, clone(snapshot))
-        this.cancellations.set(snapshot.id, cancellation)
-      },
+    return await this.runDefinition(this.requireWorkflow(id), options)
+  }
+
+  /**
+   * Start a validated definition without persisting it in the shared workflow
+   * registry. The first RUNNING snapshot is published synchronously so Remote
+   * callers can poll and cancel by id while the run continues in the Host.
+   */
+  startDefinition(definition: WorkflowDefinition, options: ExecuteWorkflowOptions = {}): WorkflowExecution {
+    const detached = clone(definition)
+    const issues = validateWorkflow(detached, type => this.nodeLibrary.resolve(type))
+    if (issues.length > 0) throw new WorkflowValidationError(issues)
+    const executionId = randomUUID()
+    const task = this.runDefinition(detached, { ...options, executionId })
+    void task.catch(error => {
+      this.ctx.logger.error('RunFlow execution %s rejected: %s', executionId, errorMessage(error))
     })
-    options.signal?.removeEventListener('abort', relay)
-    this.cancellations.delete(execution.id)
+    const execution = this.execution(executionId)
+    if (execution === undefined) {
+      throw new Error('RunFlow did not publish its initial execution snapshot')
+    }
     return execution
   }
 
@@ -206,8 +374,152 @@ export class FlowService extends Service {
     return value === undefined ? undefined : clone(value)
   }
 
-  private install(definition: WorkflowNodeDefinition): void {
-    this.nodes.set(definition.type, definition)
+  private loadWorkspace(): void {
+    if (existsSync(this.storageFile)) {
+      try {
+        const data = JSON.parse(readFileSync(this.storageFile, 'utf8')) as {
+          workflows?: WorkflowDefinition[]
+          executions?: WorkflowExecution[]
+        }
+        for (const workflow of data.workflows ?? []) this.workflows.set(workflow.id, clone(workflow))
+        for (const execution of data.executions ?? []) {
+          this.executions.set(execution.id, clone(execution))
+          this.executionOrder.push(execution.id)
+        }
+      } catch (error) {
+        this.ctx.logger.warn('RunFlow workspace could not be restored: %s', errorMessage(error))
+      }
+    }
+    this.reloadWorkflowFiles(false)
+    for (const workflow of this.workflows.values()) {
+      if (![...this.workflowFileIds.values()].includes(workflow.id)) this.persistWorkflowFile(workflow)
+    }
+  }
+
+  private reloadWorkflowFiles(persist = true): void {
+    mkdirSync(this.workflowsDir, { recursive: true })
+    const previousIds = new Set(this.workflowFileIds.values())
+    const nextFiles = new Map<string, string>()
+    for (const name of readdirSync(this.workflowsDir).filter(item => item.endsWith('.workflow.json')).sort()) {
+      const path = join(this.workflowsDir, name)
+      try {
+        const workflow = JSON.parse(readFileSync(path, 'utf8')) as WorkflowDefinition
+        if (workflow === null || typeof workflow.id !== 'string' || workflow.id.length === 0
+          || typeof workflow.name !== 'string' || !Array.isArray(workflow.nodes) || !Array.isArray(workflow.edges)) {
+          throw new Error('expected a WorkflowDefinition object')
+        }
+        this.workflows.set(workflow.id, clone(workflow))
+        nextFiles.set(path, workflow.id)
+        previousIds.delete(workflow.id)
+      } catch (error) {
+        this.ctx.logger.warn('RunFlow ignored invalid workflow file %s: %s', path, errorMessage(error))
+      }
+    }
+    for (const id of previousIds) this.workflows.delete(id)
+    this.workflowFileIds.clear()
+    for (const [path, id] of nextFiles) this.workflowFileIds.set(path, id)
+    if (persist) this.persistWorkspace()
+  }
+
+  private persistWorkflowFile(workflow: WorkflowDefinition): void {
+    mkdirSync(this.workflowsDir, { recursive: true })
+    const path = join(this.workflowsDir, workflowFileName(workflow.id))
+    const temporary = path + '.' + randomUUID() + '.tmp'
+    writeFileSync(temporary, JSON.stringify(workflow, null, 2) + '\n', 'utf8')
+    if (existsSync(path)) unlinkSync(path)
+    renameSync(temporary, path)
+    for (const [currentPath, id] of this.workflowFileIds) {
+      if (id === workflow.id && currentPath !== path) this.workflowFileIds.delete(currentPath)
+    }
+    this.workflowFileIds.set(path, workflow.id)
+  }
+
+  private removeWorkflowFile(id: string): void {
+    const matches = [...this.workflowFileIds].filter(([, workflowId]) => workflowId === id)
+    for (const [path] of matches) {
+      if (existsSync(path)) unlinkSync(path)
+      this.workflowFileIds.delete(path)
+    }
+  }
+
+  private watchWorkflowDirectory(): () => void {
+    mkdirSync(this.workflowsDir, { recursive: true })
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let watcher: FSWatcher | undefined
+    try {
+      watcher = watch(this.workflowsDir, { persistent: false }, () => {
+        if (timer !== undefined) clearTimeout(timer)
+        timer = setTimeout(() => {
+          timer = undefined
+          this.reloadWorkflowFiles()
+        }, 120)
+      })
+      watcher.on('error', error => this.ctx.logger.warn('RunFlow workflow watcher failed: %s', errorMessage(error)))
+    } catch (error) {
+      this.ctx.logger.warn('RunFlow workflow watcher could not start: %s', errorMessage(error))
+    }
+    return () => {
+      if (timer !== undefined) clearTimeout(timer)
+      watcher?.close()
+    }
+  }
+
+  private persistWorkspace(): void {
+    try {
+      mkdirSync(dirname(this.storageFile), { recursive: true })
+      const executions = this.executionOrder.slice(0, 200)
+        .map(id => this.executions.get(id))
+        .filter((value): value is WorkflowExecution => value !== undefined)
+      writeFileSync(this.storageFile, JSON.stringify({ workflows: this.listWorkflows(), executions }, null, 2), 'utf8')
+    } catch (error) {
+      this.ctx.logger.warn('RunFlow workspace could not be persisted: %s', errorMessage(error))
+    }
+  }
+  private requireWorkflow(id: string): WorkflowDefinition {
+    const workflow = this.workflows.get(id)
+    if (workflow === undefined) throw new Error('Workflow not found: ' + id)
+    return clone(workflow)
+  }
+
+  private async runDefinition(
+    workflow: WorkflowDefinition,
+    options: ExecuteWorkflowOptions,
+  ): Promise<WorkflowExecution> {
+    const cancellation = new AbortController()
+    const relay = (): void => cancellation.abort(options.signal?.reason)
+    options.signal?.addEventListener('abort', relay, { once: true })
+    const outputBase = resolve(options.outputDir ?? workflow.outputDir ?? this.defaultOutputDir)
+    try {
+      return await executeWorkflow(workflow, { ...options, signal: cancellation.signal }, {
+        maxParallelNodes: this.maxParallelNodes,
+        defaultTimeoutMs: this.defaultTimeoutMs,
+        resolveNode: type => this.nodeLibrary.resolve(type),
+        createOutput: execution => new FileExecutionOutput(outputBase, workflow, execution),
+        onUpdate: snapshot => {
+          if (!this.executions.has(snapshot.id)) this.executionOrder.unshift(snapshot.id)
+          this.executions.set(snapshot.id, clone(snapshot))
+          this.cancellations.set(snapshot.id, cancellation)
+          this.persistWorkspace()
+        },
+      })
+    } finally {
+      options.signal?.removeEventListener('abort', relay)
+      for (const [id, controller] of this.cancellations) {
+        if (controller === cancellation) this.cancellations.delete(id)
+      }
+    }
+  }
+
+  private async executeProgramNode(
+    program: string,
+    descriptor: WorkflowNodeDescriptor,
+    context: NodeExecutionContext,
+  ): Promise<JsonValue> {
+    const service = this.ctx.get('flowNodeExecutor') as {
+      runProgram(context: NodeExecutionContext, program: string, descriptor: WorkflowNodeDescriptor): Promise<JsonValue>
+    } | undefined
+    if (service === undefined) throw new Error('dsh-runflow Node executor is unavailable')
+    return await service.runProgram(context, program, descriptor)
   }
 
   private async executeAgentNode(context: NodeExecutionContext): Promise<JsonValue> {
@@ -215,13 +527,13 @@ export class FlowService extends Service {
       throw new Error('DSH Agent nodes require ExecuteWorkflowOptions.agentId as delegation authority')
     }
     const parent = this.ctx.agents.list().find(agent => String(agent.id) === context.agentId)
-    if (parent === undefined) throw new Error(`live parent Agent not found: ${context.agentId}`)
+    if (parent === undefined) throw new Error('live parent Agent not found: ' + context.agentId)
 
     const availableProviders = this.ctx.subagents.list()
     const providerName = configString(context.node.config, 'subagentProvider') ?? availableProviders[0]
     if (providerName === undefined) throw new Error('no DSH subagent provider is registered')
     const provider = this.ctx.subagents.getProvider(providerName)
-    if (provider === undefined) throw new Error(`unknown DSH subagent provider: ${providerName}`)
+    if (provider === undefined) throw new Error('unknown DSH subagent provider: ' + providerName)
 
     const modelProvider = configString(context.node.config, 'provider')
     const model = configString(context.node.config, 'model')
@@ -233,6 +545,11 @@ export class FlowService extends Service {
     }
     const persona = configString(context.node.config, 'persona')
     const maxDepth = configInteger(context.node.config, 'maxDepth')
+    context.log('Starting Harness subagent', {
+      subagentProvider: providerName,
+      modelProvider: agentOptions.provider ?? parent.options.provider ?? null,
+      model: agentOptions.model ?? parent.options.model ?? null,
+    })
     const run = await this.ctx.subagents.start(providerName, {
       label: context.node.name ?? context.node.id,
       prompt: [{ type: 'text', text: agentPrompt(configString(context.node.config, 'prompt'), context.input) }],
@@ -250,9 +567,9 @@ export class FlowService extends Service {
       await run.dispose()
     }
     if (result.stopReason !== 'completed') {
-      throw new Error(result.diagnostic ?? `subagent ${run.id} ended with ${result.stopReason}`)
+      throw new Error(result.diagnostic ?? 'subagent ' + run.id + ' ended with ' + result.stopReason)
     }
-    return json({
+    const value = json({
       runId: String(run.id),
       sessionId: String(run.localAgent?.id ?? run.id),
       subagentProvider: providerName,
@@ -264,48 +581,14 @@ export class FlowService extends Service {
       content: result.output,
       ...(result.structured === undefined ? {} : { structured: result.structured }),
     })
+    await context.writeIntermediate('subagent-result', value, 'result')
+    context.log('Harness subagent completed', { runId: String(run.id), stopReason: result.stopReason })
+    return value
   }
 
   private installBuiltins(): void {
-    const passThrough = async ({ input }: { input: JsonValue }): Promise<JsonValue> => input
-    this.install({ type: 'trigger.manual', title: 'Manual Trigger', description: 'Run the workflow on demand.', category: 'trigger', color: '#22c55e', icon: 'mouse-pointer-click', execute: passThrough })
-    this.install({ type: 'trigger.webhook', title: 'Webhook', description: 'Start from an inbound HTTP request.', category: 'trigger', color: '#22c55e', icon: 'webhook', execute: passThrough })
-    this.install({ type: 'trigger.schedule', title: 'Schedule', description: 'Start from a Cron schedule.', category: 'trigger', color: '#22c55e', icon: 'clock-3', execute: passThrough })
-    this.install({ type: 'trigger.dsh-event', title: 'DSH Event', description: 'Listen for a Cordis or DSH event.', category: 'trigger', color: '#22c55e', icon: 'radio', execute: passThrough })
-    this.install({
-      type: 'builtin.condition', title: 'Condition', description: 'Route data using a boolean comparison.', category: 'logic', color: '#a78bfa', icon: 'git-branch',
-      async execute({ input, node }) {
-        const path = typeof node.config['path'] === 'string' ? node.config['path'] : ''
-        const operator = typeof node.config['operator'] === 'string' ? node.config['operator'] : 'equals'
-        return { matched: compare(readPath(input, path), operator, node.config['value']), value: input }
-      },
-    })
-    this.install({
-      type: 'builtin.set', title: 'Set Fields', description: 'Add or replace fields on an object.', category: 'data', color: '#38bdf8', icon: 'list-plus',
-      async execute({ input, node }) { return { ...objectConfig(input), ...objectConfig(node.config['values']) } },
-    })
-    this.install({
-      type: 'http.request', title: 'HTTP Request', description: 'Call a remote HTTP endpoint.', category: 'action', color: '#fb923c', icon: 'globe-2',
-      async execute({ node, signal }) {
-        const url = node.config['url']
-        if (typeof url !== 'string' || url.length === 0) throw new Error('HTTP Request requires config.url')
-        const method = typeof node.config['method'] === 'string' ? node.config['method'] : 'GET'
-        const response = await fetch(url, { method, signal })
-        const text = await response.text()
-        if (!response.ok) throw new Error(`HTTP ${response.status}: ${text.slice(0, 500)}`)
-        try { return JSON.parse(text) as JsonValue } catch { return { status: response.status, body: text } }
-      },
-    })
-    this.install({
-      type: 'dsh.agent',
-      title: 'DSH Agent',
-      description: 'Delegate to a native Harness Subagent with dynamic model routing.',
-      category: 'ai',
-      color: '#60a5fa',
-      icon: 'bot',
-      available: true,
-      execute: context => this.executeAgentNode(context),
-    })
-    this.install({ type: 'storage.write', title: 'Storage', description: 'Persist the incoming result.', category: 'data', color: '#2dd4bf', icon: 'database', execute: passThrough })
+    for (const definition of builtinNodeDefinitions(context => this.executeAgentNode(context))) {
+      this.nodeLibrary.registerBuiltin(definition)
+    }
   }
 }
