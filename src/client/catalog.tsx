@@ -43,7 +43,7 @@ export const NODE_CATALOG: WorkflowNodeDescriptor[] = [
     ],
   },
   { type: 'builtin.set', title: 'Set Fields', description: '设置或转换字段', category: 'logic', color: '#38bdf8', icon: 'list-plus', inputs: [{ id: 'input', type: 'json' }], outputs: [{ id: 'output', type: 'json' }] },
-  { type: 'dsh.agent', title: 'DSH Agent', description: '调用 Harness 原生 Subagent', category: 'ai', color: '#60a5fa', icon: 'bot', available: true, inputs: anyInput, outputs: [{ id: 'result', label: 'result', type: 'json' }] },
+  { type: 'dsh.agent', title: 'DSH Agent', description: '原生 Subagent · AgentOptions / Structured Output / Tool Filter', category: 'ai', color: '#60a5fa', icon: 'bot', available: true, inputs: anyInput, outputs: [{ id: 'result', label: 'result', type: 'json' }] },
   { type: 'dsh.llm', title: 'LLM', description: '调用宿主大模型能力', category: 'ai', color: '#818cf8', icon: 'braces', available: false, inputs: anyInput, outputs: [{ id: 'text', type: 'text' }, { id: 'usage', type: 'json' }] },
   { type: 'storage.write', title: 'Storage', description: '写入本次 Host 执行产物', category: 'data', color: '#2dd4bf', icon: 'database', inputs: anyInput, outputs: [{ id: 'output', type: 'json' }] },
 ]

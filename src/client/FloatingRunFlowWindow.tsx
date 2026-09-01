@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
-import { Grip, Maximize2, MessageSquare, Minimize2, Workflow, X } from 'lucide-react'
+import { Grip, Maximize2, MessageSquare, Minimize2, X } from 'lucide-react'
 import { FlowApp } from './App.tsx'
+import { RunFlowMark } from './RunFlowLogo.tsx'
 
 export type RunFlowWindowMode = 'floating' | 'maximized'
 
@@ -170,7 +171,7 @@ export function FloatingRunFlowWindow({ mode, closing, onMinimize, onToggleMaxim
     <header className="runflow-window-bar" onPointerDown={beginDrag} onDoubleClick={event => {
       if ((event.target as HTMLElement).closest('button') === null) onToggleMaximize()
     }}>
-      <span className="runflow-window-mark"><Workflow size={16} /></span>
+      <span className="runflow-window-mark"><RunFlowMark size={19} /></span>
       <span className="runflow-window-title"><strong>RunFlow</strong><small>{mode === 'maximized' ? '专注模式' : '拖拽标题栏移动 · 拖拽边缘缩放 · DSH 会话仍可操作'}</small></span>
       <span className="runflow-window-actions">
         <button className="runflow-session-switch" onClick={onMinimize} aria-label="返回 DSH 会话并最小化 RunFlow" title="返回 DSH 会话（Esc）"><MessageSquare size={14} /><span>返回会话</span></button>
@@ -201,7 +202,7 @@ interface RunFlowDockProps {
 export function RunFlowDock({ workflowCount, closing, onRestore, onClose }: RunFlowDockProps) {
   return <aside data-runflow-surface className={'runflow-window-dock' + (closing ? ' is-closing' : '')} aria-label="已最小化的 RunFlow">
     <button className="runflow-dock-restore" onClick={onRestore} autoFocus aria-label="恢复 RunFlow 浮动工作台">
-      <span className="runflow-dock-mark"><Workflow size={16} /></span>
+      <span className="runflow-dock-mark"><RunFlowMark size={19} /></span>
       <span><strong>RunFlow</strong><small>已最小化 · {workflowCount} 个工作流</small></span>
     </button>
     <button className="runflow-dock-close" onClick={onClose} aria-label="关闭已最小化的 RunFlow" title="关闭"><X size={14} /></button>

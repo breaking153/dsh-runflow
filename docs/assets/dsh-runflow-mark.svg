@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">DSH RunFlow</title>
+  <desc id="desc">A play node branching into two workflow outputs.</desc>
+  <defs>
+    <linearGradient id="surface" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6E86D8"/>
+      <stop offset="0.52" stop-color="#4A5FA8"/>
+      <stop offset="1" stop-color="#274690"/>
+    </linearGradient>
+    <linearGradient id="trace" x1="13" y1="32" x2="53" y2="32" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#B8D8FF"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#10285D" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="15" fill="url(#surface)" filter="url(#shadow)"/>
+  <path d="M14 32h10m17 0h3c4.4 0 8-3.6 8-8v-3m-11 11h3c4.4 0 8 3.6 8 8v3" fill="none" stroke="url(#trace)" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="14" cy="32" r="4" fill="#FFFFFF"/>
+  <circle cx="52" cy="18" r="4" fill="#B8D8FF"/>
+  <circle cx="52" cy="46" r="4" fill="#7DD3FC"/>
+  <circle cx="32" cy="32" r="11" fill="#FFFFFF" fill-opacity="0.16" stroke="#FFFFFF" stroke-width="2"/>
+  <path d="M29 26.7 38 32l-9 5.3V26.7Z" fill="#FFFFFF"/>
+</svg>

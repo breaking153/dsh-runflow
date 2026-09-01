@@ -58,10 +58,22 @@ export class RunFlowRemoteService extends TypertRemoteService {
     const creationMode = (agent.session?.header as { agentPreset?: string } | undefined)?.agentPreset === 'cordis'
     if (creationMode) ensureRunFlowAgentAuthoring(this.ctx, this.ctx.flow, agent)
     const tools = this.ctx.get('tools') as { get(name: string, scope?: unknown): unknown } | undefined
+    const subagents = this.ctx.get('subagents')
+    const subagentProviders = subagents?.list().flatMap((id) => {
+      const provider = subagents.getProvider(id)
+      return provider === undefined
+        ? []
+        : [{
+            id,
+            inheritsParentContext: provider.inheritsParentContext,
+            capabilities: { ...provider.capabilities },
+          }]
+    }) ?? []
     return {
       workflows: this.ctx.flow.listWorkflows(),
       executions: this.ctx.flow.listExecutions(undefined, 200),
       nodes: this.ctx.flow.listNodes(),
+      subagentProviders,
       capabilities: {
         creationMode,
         runCode: tools?.get('run_code', agent) !== undefined,

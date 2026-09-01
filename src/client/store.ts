@@ -4,7 +4,7 @@ import {
   type Connection, type Edge, type EdgeChange, type Node, type NodeChange,
 } from '@xyflow/react'
 import type {
-  JsonObject, JsonValue, NodeExecutionRecord, NodeExecutionStatus,
+  FlowSubagentProviderInfo, JsonObject, JsonValue, NodeExecutionRecord, NodeExecutionStatus,
   WorkflowDefinition, WorkflowExecution, WorkflowNodeDescriptor, WorkflowPortDescriptor,
 } from '../contracts.ts'
 import { descriptorFor, mergeNodeCatalog, setHostNodeCatalog } from './catalog.tsx'
@@ -186,6 +186,7 @@ interface FlowState {
   workspaceLoading: boolean
   workspaceError: string | undefined
   nodeCatalog: WorkflowNodeDescriptor[]
+  subagentProviders: FlowSubagentProviderInfo[]
   capabilities: {
     creationMode: boolean
     runCode: boolean
@@ -245,6 +246,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   workspaceLoading: false,
   workspaceError: undefined,
   nodeCatalog: mergeNodeCatalog([]),
+  subagentProviders: [],
   capabilities: { creationMode: false, runCode: false, nodeAuthoring: false, sourceAuthoring: false },
   sourceWorkbenchOpen: false,
   workflowId: first.id,
@@ -281,6 +283,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
         workflows: workspace.workflows.length === 0 ? state.workflows : workspace.workflows,
         executions: workspace.executions,
         nodeCatalog,
+        subagentProviders: workspace.subagentProviders,
         capabilities: workspace.capabilities,
         workspaceLoading: false,
       }))

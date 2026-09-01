@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import {
   Activity, CircleCheckBig, CircleDashed, CircleX, Clock3, PanelLeftClose,
-  PanelLeftOpen, Plus, Search, Sparkles, Workflow, X, Zap,
+  PanelLeftOpen, Plus, Search, Workflow, X, Zap,
 } from 'lucide-react'
 import type { WorkflowExecution } from '../contracts.ts'
+import { RunFlowMark } from './RunFlowLogo.tsx'
 import { useFlowRuntime } from './runtime.ts'
 import { useFlowStore } from './store.ts'
 import {
@@ -39,7 +40,7 @@ export function WorkflowSidebar({ onClose }: { onClose?: (() => void) | undefine
 
   return <aside className={'workflow-sidebar ' + (collapsed ? 'is-collapsed' : '')} aria-label="Workflow 管理">
     <header className="workflow-sidebar-brand">
-      <span className="workflow-sidebar-logo"><Sparkles size={17} /></span>
+      <span className="workflow-sidebar-logo"><RunFlowMark size={20} /></span>
       {!collapsed && <span className="workflow-sidebar-brand-copy"><strong>RunFlow</strong><small>DSH workflows</small></span>}
       <button onClick={toggle} aria-label={collapsed ? '展开 Workflow 管理栏' : '收起 Workflow 管理栏'} title={collapsed ? '展开侧栏' : '收起侧栏'}>
         {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}

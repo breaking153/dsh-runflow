@@ -68,6 +68,7 @@ describe('RunFlow interactive UI components', () => {
     useFlowStore.setState({
       sourceWorkbenchOpen: true,
       capabilities: { creationMode: false, runCode: false, nodeAuthoring: false, sourceAuthoring: false },
+      subagentProviders: [],
     })
     await act(async () => root.render(<SourceWorkbench />))
     expect(host.textContent).toContain('仅创造模式可编辑可信 Host 源码')

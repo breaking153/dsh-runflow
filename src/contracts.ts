@@ -162,6 +162,7 @@ export interface FlowSubagentProviderInfo {
   id: string
   inheritsParentContext: boolean
   capabilities: {
+    agentOptions: boolean
     outputSchema: boolean
     depthLimit: boolean
     toolFilter: boolean
@@ -174,6 +175,17 @@ export interface FlowModelInfo {
   name: string
   description?: string
   inputModalities?: string[]
+  contextWindow?: number
+  defaultMaxTokens?: number
+  reasoning?: {
+    efforts: {
+      id: string
+      name: string
+      description?: string
+    }[]
+    defaultEffort?: string
+  }
+  resolutionError?: string
 }
 
 export interface FlowModelProviderInfo {

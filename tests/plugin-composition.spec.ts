@@ -53,7 +53,7 @@ describe('dsh-runflow Cordis composition', () => {
     new SubagentRuntime(ctx)
     new SystemPrompt(ctx, {})
     const runtime = new FixtureCodeRuntime(ctx)
-    new ToolRuntime(ctx, { mode: 'code' })
+    new ToolRuntime(ctx, { mode: 'ptc' })
     new TypertRegistry(ctx)
     await ctx.plugin(flowPlugin, {
       outputDir: join(root, 'output'),
@@ -92,7 +92,7 @@ describe('dsh-runflow Cordis composition', () => {
     const subagentProvider: SubagentProvider = {
       name: 'fixture-spawn',
       inheritsParentContext: false,
-      capabilities: { outputSchema: true, depthLimit: true, toolFilter: true, persona: true },
+      capabilities: { agentOptions: true, outputSchema: true, depthLimit: true, toolFilter: true, persona: true },
       start(request) {
         captured = request
         return Promise.resolve({
@@ -117,11 +117,22 @@ describe('dsh-runflow Cordis composition', () => {
         type: 'dsh.agent',
         config: {
           subagentProvider: 'fixture-spawn',
-          provider: 'route-a',
-          model: 'model-a',
-          maxTokens: 2048,
+          label: 'Strict reviewer',
+          agentOptions: {
+            provider: 'route-a',
+            model: 'model-a',
+            reasoningEffort: 'high',
+            maxTokens: 2048,
+          },
           maxDepth: 2,
           persona: 'Review precisely.',
+          toolFilter: { allow: ['read_file', 'search'], deny: ['shell'] },
+          outputSchema: {
+            type: 'object',
+            properties: { verdict: { type: 'string' } },
+            required: ['verdict'],
+            additionalProperties: false,
+          },
           prompt: 'Review {{input}}',
         },
       }],
@@ -136,13 +147,49 @@ describe('dsh-runflow Cordis composition', () => {
       subagentProvider: 'fixture-spawn',
       modelProvider: 'route-a',
       model: 'model-a',
+      reasoningEffort: 'high',
+      maxTokens: 2048,
       text: 'review complete',
       structured: { verdict: 'approve' },
     }))
-    expect(captured?.agentOptions).toEqual({ provider: 'route-a', model: 'model-a', maxTokens: 2048 })
+    expect(captured?.label).toBe('Strict reviewer')
+    expect(captured?.agentOptions).toEqual({ provider: 'route-a', model: 'model-a', reasoningEffort: 'high', maxTokens: 2048 })
+    expect(captured?.outputSchema).toEqual({
+      type: 'object',
+      properties: { verdict: { type: 'string' } },
+      required: ['verdict'],
+      additionalProperties: false,
+    })
     expect(captured?.maxDepth).toBe(2)
     expect(captured?.persona).toBe('Review precisely.')
+    expect(captured?.toolFilter).toEqual({ allow: ['read_file', 'search'], deny: ['shell'] })
     expect(disposed).toBe(true)
+
+    let unsupportedStarted = false
+    ctx.subagents.registerProvider({
+      name: 'fixture-limited',
+      inheritsParentContext: false,
+      capabilities: { agentOptions: false, outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
+      start() {
+        unsupportedStarted = true
+        return Promise.reject(new Error('must not start'))
+      },
+    })
+    ctx.flow.saveWorkflow({
+      id: 'unsupported-agent-flow',
+      name: 'Unsupported Agent Flow',
+      version: 1,
+      nodes: [{
+        id: 'limited',
+        type: 'dsh.agent',
+        config: { subagentProvider: 'fixture-limited', agentOptions: { reasoningEffort: 'high' } },
+      }],
+      edges: [],
+    })
+    const unsupported = await ctx.flow.execute('unsupported-agent-flow', { agentId: 'agent-1' })
+    expect(unsupported.status).toBe('FAILED')
+    expect(unsupported.error).toContain('does not support child agentOptions')
+    expect(unsupportedStarted).toBe(false)
     await ctx.fiber.dispose()
     await rm(root, { recursive: true, force: true })
   })

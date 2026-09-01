@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { AgentOptions } from '@deepseek-ai/dsh-agent'
+import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { SubagentResult } from '@deepseek-ai/dsh-subagent'
+import { assertObjectJsonSchema, type ObjectJsonSchema, type ToolRestriction } from '@deepseek-ai/dsh-tools'
 import { builtinNodeDefinitions } from '../nodes/builtins.ts'
 import type {
   ExecuteWorkflowOptions,
@@ -57,9 +59,76 @@ function configString(config: JsonObject, key: string): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined
 }
 
-function configInteger(config: JsonObject, key: string): number | undefined {
+function configRecord(config: JsonObject, key: string): JsonObject | undefined {
   const value = config[key]
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
+  if (value === undefined || value === null || value === '') return undefined
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('DSH Agent config.' + key + ' must be a JSON object')
+  }
+  return value
+}
+
+function agentOption(config: JsonObject, key: string): JsonValue | undefined {
+  const nested = configRecord(config, 'agentOptions')
+  return nested !== undefined && Object.hasOwn(nested, key) ? nested[key] : config[key]
+}
+
+function optionalString(value: JsonValue | undefined, path: string): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(path + ' must be a non-empty string when configured')
+  }
+  return value.trim()
+}
+
+function optionalInteger(
+  value: JsonValue | undefined,
+  path: string,
+  minimum: number,
+): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < minimum) {
+    throw new Error(path + ' must be a safe integer greater than or equal to ' + String(minimum))
+  }
+  return value
+}
+
+function optionalStringList(value: JsonValue | undefined, path: string): string[] | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  const source = typeof value === 'string'
+    ? value.split(/[\n,]/u).map(item => item.trim()).filter(Boolean)
+    : value
+  if (!Array.isArray(source)) {
+    throw new Error(path + ' must be an array of non-empty strings')
+  }
+  const normalized: string[] = []
+  for (const item of source) {
+    if (typeof item !== 'string' || item.trim().length === 0) {
+      throw new Error(path + ' must be an array of non-empty strings')
+    }
+    normalized.push(item.trim())
+  }
+  const unique = [...new Set(normalized)]
+  return unique.length === 0 ? undefined : unique
+}
+
+function agentOutputSchema(config: JsonObject): ObjectJsonSchema | undefined {
+  const value = config['outputSchema']
+  if (value === undefined || value === null || value === '') return undefined
+  assertObjectJsonSchema(value)
+  return structuredClone(value)
+}
+
+function agentToolFilter(config: JsonObject): ToolRestriction | undefined {
+  const record = configRecord(config, 'toolFilter')
+  const allow = optionalStringList(record?.['allow'] ?? config['toolAllow'], 'DSH Agent config.toolFilter.allow')
+  const deny = optionalStringList(record?.['deny'] ?? config['toolDeny'], 'DSH Agent config.toolFilter.deny')
+  return allow === undefined && deny === undefined
+    ? undefined
+    : {
+        ...(allow === undefined ? {} : { allow }),
+        ...(deny === undefined ? {} : { deny }),
+      }
 }
 
 function agentPrompt(template: string | undefined, input: JsonValue): string {
@@ -213,11 +282,37 @@ export class FlowService extends Service {
         return {
           id: provider.id,
           name: provider.name,
-          models: models.map(model => ({
-            id: model.id,
-            name: model.name,
-            ...(model.description === undefined ? {} : { description: model.description }),
-            ...(model.inputModalities === undefined ? {} : { inputModalities: [...model.inputModalities] }),
+          models: await Promise.all(models.map(async (model) => {
+            const base = {
+              id: model.id,
+              name: model.name,
+              ...(model.description === undefined ? {} : { description: model.description }),
+              ...(model.inputModalities === undefined ? {} : { inputModalities: [...model.inputModalities] }),
+            }
+            try {
+              const resolved = await this.ctx.llm.resolveModelInfo(provider.id, model.id)
+              return {
+                ...base,
+                ...(resolved.context === undefined ? {} : { contextWindow: resolved.context.contextWindow }),
+                ...(resolved.defaultMaxTokens === undefined ? {} : { defaultMaxTokens: resolved.defaultMaxTokens }),
+                ...(resolved.reasoning === undefined
+                  ? {}
+                  : {
+                      reasoning: {
+                        efforts: resolved.reasoning.efforts.map(effort => ({
+                          id: String(effort.id),
+                          name: effort.name,
+                          ...(effort.description === undefined ? {} : { description: effort.description }),
+                        })),
+                        ...(resolved.reasoning.defaultEffort === undefined
+                          ? {}
+                          : { defaultEffort: String(resolved.reasoning.defaultEffort) }),
+                      },
+                    }),
+              }
+            } catch (error) {
+              return { ...base, resolutionError: errorMessage(error) }
+            }
           })),
         }
       } catch (error) {
@@ -535,29 +630,73 @@ export class FlowService extends Service {
     const provider = this.ctx.subagents.getProvider(providerName)
     if (provider === undefined) throw new Error('unknown DSH subagent provider: ' + providerName)
 
-    const modelProvider = configString(context.node.config, 'provider')
-    const model = configString(context.node.config, 'model')
-    const maxTokens = configInteger(context.node.config, 'maxTokens')
+    const modelProvider = optionalString(
+      agentOption(context.node.config, 'provider'),
+      'DSH Agent config.agentOptions.provider',
+    )
+    const model = optionalString(
+      agentOption(context.node.config, 'model'),
+      'DSH Agent config.agentOptions.model',
+    )
+    const reasoningEffort = optionalString(
+      agentOption(context.node.config, 'reasoningEffort'),
+      'DSH Agent config.agentOptions.reasoningEffort',
+    )
+    const maxTokens = optionalInteger(
+      agentOption(context.node.config, 'maxTokens'),
+      'DSH Agent config.agentOptions.maxTokens',
+      1,
+    )
     const agentOptions: AgentOptions = {
       ...(modelProvider === undefined ? {} : { provider: modelProvider }),
       ...(model === undefined ? {} : { model }),
+      ...(reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(reasoningEffort) }),
       ...(maxTokens === undefined ? {} : { maxTokens }),
     }
     const persona = configString(context.node.config, 'persona')
-    const maxDepth = configInteger(context.node.config, 'maxDepth')
+    const maxDepth = optionalInteger(context.node.config['maxDepth'], 'DSH Agent config.maxDepth', 0)
+    const outputSchema = agentOutputSchema(context.node.config)
+    const toolFilter = agentToolFilter(context.node.config)
+    const label = configString(context.node.config, 'label') ?? context.node.name ?? context.node.id
+
+    if (Object.keys(agentOptions).length > 0 && !provider.capabilities.agentOptions) {
+      throw new Error('DSH subagent provider "' + providerName + '" does not support child agentOptions')
+    }
+    if (outputSchema !== undefined && !provider.capabilities.outputSchema) {
+      throw new Error('DSH subagent provider "' + providerName + '" does not support outputSchema')
+    }
+    if (maxDepth !== undefined && !provider.capabilities.depthLimit) {
+      throw new Error('DSH subagent provider "' + providerName + '" cannot enforce maxDepth')
+    }
+    if (toolFilter !== undefined && !provider.capabilities.toolFilter) {
+      throw new Error('DSH subagent provider "' + providerName + '" does not support toolFilter')
+    }
+    if (persona !== undefined && !provider.capabilities.persona) {
+      throw new Error('DSH subagent provider "' + providerName + '" does not support persona')
+    }
+
     context.log('Starting Harness subagent', {
       subagentProvider: providerName,
       modelProvider: agentOptions.provider ?? parent.options.provider ?? null,
       model: agentOptions.model ?? parent.options.model ?? null,
+      reasoningEffort: agentOptions.reasoningEffort ?? parent.options.reasoningEffort ?? null,
+      maxTokens: agentOptions.maxTokens ?? parent.options.maxTokens ?? null,
+      maxDepth: maxDepth ?? null,
+      structuredOutput: outputSchema !== undefined,
+      toolFilter: toolFilter === undefined
+        ? null
+        : { allow: toolFilter.allow?.length ?? 0, deny: toolFilter.deny?.length ?? 0 },
     })
     const run = await this.ctx.subagents.start(providerName, {
-      label: context.node.name ?? context.node.id,
+      label,
       prompt: [{ type: 'text', text: agentPrompt(configString(context.node.config, 'prompt'), context.input) }],
       parent,
       signal: context.signal,
       ...(Object.keys(agentOptions).length === 0 ? {} : { agentOptions }),
+      ...(outputSchema === undefined ? {} : { outputSchema }),
       ...(persona === undefined ? {} : { persona }),
       ...(maxDepth === undefined ? {} : { maxDepth }),
+      ...(toolFilter === undefined ? {} : { toolFilter }),
     })
 
     let result: SubagentResult
@@ -576,6 +715,22 @@ export class FlowService extends Service {
       inheritsParentContext: provider.inheritsParentContext,
       modelProvider: agentOptions.provider ?? parent.options.provider ?? null,
       model: agentOptions.model ?? parent.options.model ?? null,
+      reasoningEffort: agentOptions.reasoningEffort ?? parent.options.reasoningEffort ?? null,
+      maxTokens: agentOptions.maxTokens ?? parent.options.maxTokens ?? null,
+      agentOptions: {
+        provider: agentOptions.provider ?? parent.options.provider ?? null,
+        model: agentOptions.model ?? parent.options.model ?? null,
+        reasoningEffort: agentOptions.reasoningEffort ?? parent.options.reasoningEffort ?? null,
+        maxTokens: agentOptions.maxTokens ?? parent.options.maxTokens ?? null,
+      },
+      request: {
+        label,
+        maxDepth: maxDepth ?? null,
+        persona: persona !== undefined,
+        outputSchema: outputSchema ?? null,
+        toolFilter: toolFilter ?? null,
+      },
+      providerCapabilities: provider.capabilities,
       stopReason: result.stopReason,
       text: assistantText(result),
       content: result.output,

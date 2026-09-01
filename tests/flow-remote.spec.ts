@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { SubagentRuntime, type SubagentProvider } from '@deepseek-ai/dsh-subagent'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { WorkflowDefinition, WorkflowExecution } from '../src/contracts.ts'
 import { FlowService } from '../src/flow-service.ts'
@@ -36,6 +37,30 @@ afterEach(async () => {
 })
 
 describe('RunFlow Host Remote', () => {
+  it('projects live Subagent provider capabilities into the UI workspace', async () => {
+    const root = await testRoot()
+    const ctx = new Context()
+    new SubagentRuntime(ctx)
+    const provider: SubagentProvider = {
+      name: 'capable-spawn',
+      inheritsParentContext: true,
+      capabilities: { agentOptions: true, outputSchema: true, depthLimit: false, toolFilter: true, persona: true },
+      start() { return Promise.reject(new Error('not used')) },
+    }
+    ctx.subagents.registerProvider(provider)
+    new FlowService(ctx, {
+      nodesDir: join(root, 'nodes'), storageDir: join(root, 'workspace'), workflowsDir: join(root, 'workflows'),
+    })
+
+    const workspace = new RunFlowRemoteService(ctx).workspace({ id: 'agent-catalog' } as Agent)
+    expect(workspace.subagentProviders).toEqual([{
+      id: 'capable-spawn',
+      inheritsParentContext: true,
+      capabilities: { agentOptions: true, outputSchema: true, depthLimit: false, toolFilter: true, persona: true },
+    }])
+    await ctx.fiber.dispose()
+  })
+
   it('hot-loads a workflow definition edited on disk', async () => {
     const root = await testRoot()
     const workflowsDir = join(root, 'workflows')
@@ -96,6 +121,7 @@ describe('RunFlow Host Remote', () => {
     ]))
     expect(execution.outputDir).toContain(receipt.executionId)
     expect(remote.workspace(agent).workflows).toEqual([expect.objectContaining({ id: definition.id })])
+    expect(remote.workspace(agent).subagentProviders).toEqual([])
     expect(await readdir(join(root, 'workflows'))).toEqual([expect.stringMatching(/\.workflow\.json$/)])
 
   })

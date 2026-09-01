@@ -2,12 +2,16 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
-import { Activity, CircleCheckBig, CircleDashed, CircleX, Clock3, LoaderCircle, Workflow } from 'lucide-react'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import { Activity, CircleCheckBig, CircleDashed, CircleX, Clock3, LoaderCircle } from 'lucide-react'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { connectFlowModelCatalog } from './model-catalog.ts'
+import { RunFlowMark } from './RunFlowLogo.tsx'
 import { connectFlowRuntime, useFlowRuntime } from './runtime.ts'
 import { FloatingRunFlowWindow, RunFlowDock, type RunFlowWindowMode } from './FloatingRunFlowWindow.tsx'
 import { RUNFLOW_WINDOW_STYLES } from './floating-window-styles.ts'
@@ -123,11 +127,11 @@ function FlowLauncher({ wide }: FlowLauncherProps) {
     <div className="flow-launcher" onMouseLeave={scheduleClose} style={{ '--flow-launch-align': wide ? 'flex-start' : 'center' } as CSSProperties}>
       <style>{FLOW_STYLES + RUNFLOW_SIDEBAR_STYLES + RUNFLOW_WINDOW_STYLES}</style>
       <button ref={triggerRef} type="button" className="flow-launcher-button" onMouseEnter={scheduleShow} onFocus={show} onBlur={scheduleClose} onClick={() => open ? close() : openRunFlow()} aria-label={open ? '关闭 DSH RunFlow' : '打开 DSH RunFlow'} aria-expanded={preview || open} aria-controls="dsh-runflow-workflow-preview">
-        <Workflow size={18} />{wide && <span>RunFlow</span>}
+        <RunFlowMark size={20} />{wide && <span>RunFlow</span>}
       </button>
       {preview && !open && createPortal(<section id="dsh-runflow-workflow-preview" className="runflow-host-preview" style={position} onMouseEnter={show} onMouseLeave={scheduleClose} onFocus={show} onBlur={scheduleClose} aria-label="RunFlow 工作流概览">
         <header>
-          <span className="runflow-host-preview-icon"><Workflow size={17} /></span>
+          <span className="runflow-host-preview-icon"><RunFlowMark size={20} /></span>
           <span><strong>RunFlow 概览</strong><small>{workflows.length} 个工作流 · {publishedCount} 个已发布</small></span>
           {loading ? <LoaderCircle className="runflow-preview-spin" size={15} /> : runningCount > 0 ? <span className="runflow-live-count"><Activity size={12} />{runningCount}</span> : null}
         </header>
@@ -146,7 +150,7 @@ function FlowLauncher({ wide }: FlowLauncherProps) {
           })}
           {workflows.length === 0 && <div className="runflow-host-preview-empty">当前 Host 中还没有工作流</div>}
         </div>
-        <footer><button onClick={() => openRunFlow()}><Workflow size={14} />打开工作流管理</button>{executions.length > 0 && <span>最近记录 {executions.length} 条</span>}</footer>
+        <footer><button onClick={() => openRunFlow()}><RunFlowMark size={16} />打开工作流管理</button>{executions.length > 0 && <span>最近记录 {executions.length} 条</span>}</footer>
       </section>, document.body)}
       {open && createPortal(minimized
         ? <RunFlowDock workflowCount={workflows.length} closing={closing} onRestore={restore} onClose={close} />

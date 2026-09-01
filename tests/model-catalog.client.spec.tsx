@@ -1,4 +1,4 @@
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   connectFlowModelCatalog,
@@ -28,7 +28,14 @@ const readyDirectory = () => observable({
   groups: [{
     id: 'deepseek',
     name: 'DeepSeek',
-    models: [{ id: 'deepseek-chat', name: 'DeepSeek Chat' }],
+    models: [{
+      id: 'deepseek-chat',
+      name: 'DeepSeek Chat',
+      reasoning: {
+        efforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }],
+        defaultEffort: 'high',
+      },
+    }],
   }],
   failures: [],
   status: 'ready' as const,
@@ -64,12 +71,23 @@ describe('Flow client model catalog bridge', () => {
       current: { provider: 'deepseek', model: 'deepseek-chat' },
     })
     expect(modelsForProvider(getFlowModelCatalogSnapshot(), 'deepseek')).toEqual([
-      expect.objectContaining({ id: 'deepseek-chat' }),
+      expect.objectContaining({
+        id: 'deepseek-chat',
+        reasoning: expect.objectContaining({ defaultEffort: 'high' }),
+      }),
     ])
 
     directory.set({
       ...directory.getSnapshot(),
-      groups: [{ id: 'openai', name: 'OpenAI', models: [{ id: 'gpt-test', name: 'GPT Test' }] }],
+      groups: [{
+        id: 'openai',
+        name: 'OpenAI',
+        models: [{
+          id: 'gpt-test',
+          name: 'GPT Test',
+          reasoning: { efforts: [{ id: 'high', name: 'High' }], defaultEffort: 'high' },
+        }],
+      }],
     })
     expect(modelsForProvider(getFlowModelCatalogSnapshot(), 'openai')).toEqual([
       expect.objectContaining({ id: 'gpt-test' }),

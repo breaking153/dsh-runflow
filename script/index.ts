@@ -1,7 +1,7 @@
 /** Cordis plugin that executes Flow JavaScript nodes through DSH run_code. */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { RUN_CODE_NAME } from '@deepseek-ai/dsh-tools'
 import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import type { JsonValue, NodeExecutionContext } from '../src/contracts.ts'
@@ -207,7 +207,7 @@ export class FlowScriptService extends Service {
         throw new Error('JavaScript nodes require the DSH TypeScript code runtime; active runtime is ' + language)
       }
       const executed = await this.ctx.tools.execute({
-        callId: CallId('flow:' + request.executionId + ':' + request.nodeId + ':' + requestId),
+        callId: ToolCallId('flow:' + request.executionId + ':' + request.nodeId + ':' + requestId),
         name: RUN_CODE_NAME,
         arguments: {
           code: codeProgram(request.program, request),

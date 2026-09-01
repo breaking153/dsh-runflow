@@ -4,7 +4,13 @@ import type {
   TypertSchema,
 } from '@deepseek-ai/dsh-typert-protocol'
 import type { TypertContribution } from '@deepseek-ai/dsh-typert-registry'
-import type { JsonValue, WorkflowDefinition, WorkflowExecution, WorkflowNodeDescriptor } from './contracts.ts'
+import type {
+  FlowSubagentProviderInfo,
+  JsonValue,
+  WorkflowDefinition,
+  WorkflowExecution,
+  WorkflowNodeDescriptor,
+} from './contracts.ts'
 import type { RunFlowPluginSource, SaveRunFlowPluginSourceRequest } from './plugin-sources.ts'
 
 export interface RunFlowStartRequest {
@@ -25,6 +31,8 @@ export interface RunFlowWorkspaceSnapshot {
   executions: WorkflowExecution[]
   /** Live Host registry, including dynamically loaded Node and Script providers. */
   nodes: WorkflowNodeDescriptor[]
+  /** Live DSH Subagent providers and their start-time feature capabilities. */
+  subagentProviders: FlowSubagentProviderInfo[]
   capabilities: {
     creationMode: boolean
     runCode: boolean
