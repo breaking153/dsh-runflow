@@ -12,7 +12,7 @@
 
 DSH RunFlow 直接复用 DeepSeek Harness 的 Agent、Subagent、LLM Provider、`run_code`、scope、权限与生命周期能力，把可视化编排、节点开发和执行调试放进同一个 Host。它不是另一套 Agent Runtime，也不会通过独立 HTTP 服务绕过 DSH。
 
-> 当前版本为 `0.1.0` Alpha。手动触发、条件、字段处理、HTTP、JavaScript、DSH Agent 与存储节点可真实执行；Webhook、Schedule、DSH Event 和独立 LLM 节点仍会明确禁用，详见[能力边界](#能力边界)。
+> 当前版本为 `0.1.0` Alpha，Host 架构已升级为 v2。手动触发、分支、排序、聚合、JSON、等待、HTTP、JavaScript、DSH Agent 与存储节点可真实执行；Webhook、Schedule、DSH Event 和独立 LLM 节点仍会明确禁用，详见[能力边界](#能力边界)。
 
 ## 核心能力
 
@@ -21,13 +21,14 @@ DSH RunFlow 直接复用 DeepSeek Harness 的 Agent、Subagent、LLM Provider、
 - **多 Workflow 管理**：侧栏集中管理 Workflow、状态与最近执行；UI 创建和修改后立即持久化。
 - **可观测执行**：执行记录、节点状态、耗时、输入、输出、日志、错误与产物统一进入 Details UI。
 - **节点开发闭环**：创造模式工具和 Node Lab 支持创建、测试、热重载、内容哈希版本和通过测试后固化。
-- **独立运行数据**：Workspace、Workflow 与输出统一存放在 `~/.dsh_agent_workflow/`，不污染 DSH 仓库或插件目录。
+- **独立运行数据**：Workflow、Execution 与输出统一存放在 `~/.dsh_agent_workflow/`，不污染 DSH 仓库或插件目录。
+- **AI 审阅优先**：Agent 生成的 Workflow 先进入 Review，用户确认差异、诊断与端口后再微调；所有人工修改都会留下“已调整”状态。
 
 ## 界面与操作逻辑
 
 ### 1. 从 DSH 主界面进入
 
-将鼠标移到 DSH 侧栏的 **RunFlow** 入口，会先看到多 Workflow 概览，包括 Trigger、发布状态和最近执行结果；点击后打开浮动工作台。
+将鼠标移到 DSH 侧栏的 **RunFlow** 入口，会先看到多 Workflow 概览，包括 Trigger 和最近执行结果；点击后打开浮动工作台。
 
 ![DSH 侧栏中的 RunFlow 多 Workflow 概览](./output/playwright/runflow-host-sidebar-hover.png)
 
@@ -37,29 +38,34 @@ DSH RunFlow 直接复用 DeepSeek Harness 的 Agent、Subagent、LLM Provider、
 
 Workflow 首页用于创建、搜索、筛选、复制和删除流程。左侧列表始终显示 Trigger 与最近执行摘要；由 UI 创建或编辑的 Workflow 会立即写入本地文件，不会在执行一次后消失。
 
-![Workflow 管理页](./output/playwright/docs-workflow-management.png)
+![左侧 Workflows 页签与工作流状态](./output/playwright/runflow-workflows-desktop.png)
 
 基本路径：
 
 1. 点击 **新建工作流 / Create workflow**。
-2. 在左侧选择 Workflow，在顶部修改名称和状态。
-3. 点击 **Save** 保存，或直接运行；执行前 RunFlow 也会再次确认持久化。
+2. 在左侧选择 Workflow，在顶部修改名称。
+3. 修改会实时自动保存到独立 Workflow 文件；执行前 RunFlow 也会再次确认持久化。
 4. 在 **执行记录 / Executions** 中查看历史状态与节点结果。
 
 ### 3. 编辑画布与添加节点
 
-![Workflow 编辑器](./output/playwright/docs-workflow-editor.png)
+![左侧 Nodes 页签与分组节点库](./output/playwright/comfy-sidebar-nodes.png)
 
 画布遵循常见自动化编辑器的操作习惯，但使用 DSH 蓝色视觉系统：
 
 - 鼠标左键拖动空白区域：框选多个节点。
-- `Space` + 拖动：平移画布；滚轮或控制栏：缩放与适配视图。
+- 按住鼠标右键拖动：平移画布；滚轮或控制栏：缩放与适配视图。
+- 左侧 **Nodes** 页签：搜索或折叠节点分组，点击可插入，拖到画布可精确放置。
 - 右键点击空白区域，或点击 **Add node**：打开 Node Library。
 - 点击节点：在右侧 Inspector 编辑配置；复制或删除使用 Inspector 顶部按钮。
 - 从 output/input 引脚拖到空白区域后松开：只显示类型兼容、方向正确的候选节点。
 - 在引脚上停留约 500ms：显示有限长度预览；点击引脚或展开按钮查看完整数据。
 
-![可搜索的 Node Library](./output/playwright/docs-node-library.png)
+![DSH 蓝色可见框选反馈](./output/playwright/comfy-selection-marquee.png)
+
+![可拉伸的参数属性栏与 typed ports](./output/playwright/runflow-editor-desktop.png)
+
+自定义节点可用可选的斜杠路径 `group` 声明自己的层级，例如 `Acme Tools/Images`。不声明时继续使用内置 `category` 的兼容分组；Node Lab 只负责源码开发，不再承担节点发现。
 
 ### 4. 配置 DSH Agent 节点
 
@@ -95,7 +101,7 @@ Host 会在执行前逐项校验 Provider capability。Provider 不支持的 `ou
 
 ### 6. 在 Node Lab 中开发节点和脚本
 
-创造模式的编辑器标题栏提供 **Node Lab**。它直接读取 `nodes/` 与 `script/` 的 Host source library，保存后显示内容哈希版本并触发串行热重载。
+左侧 **Nodes** 页签底部提供 **Node Lab**。创造模式下，它直接读取 `nodes/` 与 `script/` 的 Host source library，保存后显示内容哈希版本并触发串行热重载。
 
 - 轻量编辑器支持行号、Tab 缩进、`Ctrl+Space` 和输入 `.` 触发基础补全。
 - 内置补全覆盖 `ctx.flow`、`ctx.flowScript`、`ctx.agents`、`ctx.llm`、`ctx.tools`、`execution.node.config`、日志和中间产物 API。
@@ -107,10 +113,9 @@ Host 会在执行前逐项校验 Provider capability。Provider 不支持的 `ou
 
 ### 本地 Link 安装
 
-先构建插件：
+以下命令从 `dsh-flow` 仓库根目录开始，并假定 `deepseek-harness` 仓库位于同级目录。先构建插件：
 
 ```powershell
-cd D:\A-AiProject\dsh-flow
 pnpm install
 pnpm build
 ```
@@ -118,8 +123,8 @@ pnpm build
 再从 DeepSeek Harness 仓库把插件加入 Web profile：
 
 ```powershell
-cd D:\A-AiProject\deepseek-harness
-pnpm dsh plugin --profile web add "link:D:/A-AiProject/dsh-flow"
+cd ../deepseek-harness
+pnpm dsh plugin --profile web add "link:../dsh-flow"
 ```
 
 重启 Web profile 后，DSH 侧栏会出现 **RunFlow**。Bundle 默认注入：
@@ -196,6 +201,7 @@ export default defineRunFlowNodePlugin({
     title: 'Transform',
     description: 'Transform incoming JSON',
     category: 'data',
+    group: 'Example/Data transforms',
     color: '#4A5FA8',
     icon: 'braces',
     inputs: [{ id: 'source', type: 'json', required: true }],
@@ -257,10 +263,10 @@ queued → running → success | error | cancelled
 ```text
 ~/.dsh_agent_workflow/
 ├─ data/
-│  ├─ workspace.json
 │  ├─ workflows/
-│  │  └─ <workflow-id>.workflow.json
-│  └─ .legacy-import-v1.json
+│  │  └─ <workflow-id>-<hash>.workflow.json
+│  └─ executions/
+│     └─ <execution-id>-<hash>.execution.json
 └─ output/
 ```
 
@@ -284,7 +290,7 @@ queued → running → success | error | cancelled
       └─ 001-<label>.json
 ```
 
-首次升级会把旧 `<process.cwd()>/data/runflow/workspace.json` 和旧 Workflow 复制到新目录，不自动删除旧文件。显式配置 `storageDir`、`workflowsDir` 或 `outputDir` 时仍尊重配置值。
+后端 v2 不再维护 `workspace.json`，也不提供开发阶段的旧状态迁移。Workflow 与 Execution 各自只有一个文件权威来源，使用临时文件 + 原子重命名写入。显式配置 `storageDir`、`workflowsDir`、`executionsDir` 或 `outputDir` 时仍尊重配置值。
 
 ## 配置
 
@@ -293,8 +299,9 @@ queued → running → success | error | cancelled
 | `maxParallelNodes` | `4` | 同一批可运行节点的最大并发数，范围 1–64 |
 | `defaultTimeoutMs` | `30000` | 节点默认超时，范围 100–3,600,000ms |
 | `outputDir` | `~/.dsh_agent_workflow/output` | 默认执行输出根目录 |
-| `storageDir` | `~/.dsh_agent_workflow/data` | Workspace 数据目录 |
+| `storageDir` | `~/.dsh_agent_workflow/data` | v2 仓库父目录 |
 | `workflowsDir` | `<storageDir>/workflows` | Workflow 文件目录 |
+| `executionsDir` | `<storageDir>/executions` | Execution 历史文件目录 |
 | `nodesDir` | `<plugin>/nodes` | Node Provider 与草稿目录 |
 | `scriptsDir` | `<plugin>/script` | Script Provider 目录 |
 | `watchFiles` | `true` | 监听 Workflow、Node 与 Script 文件变化 |
@@ -308,6 +315,11 @@ queued → running → success | error | cancelled
 | `trigger.manual` | 可执行 | Host DAG 手动起点 |
 | `builtin.condition` | 可执行 | 条件分支 |
 | `builtin.set` | 可执行 | 字段设置与转换 |
+| `builtin.switch` | 可执行 | 命名 match / fallback 多输出路由 |
+| `builtin.sort` | 可执行 | JSON 数组字段排序 |
+| `builtin.aggregate` | 可执行 | count / sum / average / min / max |
+| `builtin.json-parse` / `builtin.json-stringify` | 可执行 | text 与 JSON 类型转换 |
+| `builtin.wait` / `builtin.stop-error` | 可执行 | 可取消等待与显式失败 |
 | `dsh.agent` | 可执行 | `ctx.subagents.start()` + 动态 Provider / Model |
 | `script.javascript` | 可执行 | `ctx.flowScript` → DSH `run_code` |
 | `http.request` | 可执行 | Host `fetch()`，支持 method、headers、JSON/string body |
@@ -339,7 +351,8 @@ script/                 Script executor、run_code channel 与 Host Script 插�
 src/authoring-tools.ts  创造模式 scoped tools / skill
 src/directory-plugin-loader.ts  内容哈希与串行热重载
 src/engine.ts           类型端口校验、DAG、retry / timeout / cancel
-src/flow-service.ts     ctx.flow、Agent adapter、Provider snapshot
+src/flow-service.ts     v2 应用门面、执行协调与 Provider snapshot
+src/backend/v2/         Workflow/Execution 文件仓库与 DSH Agent adapter
 src/remote-service.ts   Agent 授权的 start / poll / cancel Remote
 src/client/             浮动工作台、画布、Inspector、Details UI
 ```

@@ -12,22 +12,23 @@
 
 DSH RunFlow reuses the Agent, Subagent, LLM Provider, `run_code`, scope, permission, and lifecycle systems already provided by DeepSeek Harness. Visual authoring, node development, execution, and debugging all run inside the same Host. RunFlow is not a second Agent runtime and does not bypass DSH through a standalone HTTP service.
 
-> The current release is `0.1.0` Alpha. Manual Trigger, Condition, Set Fields, HTTP, JavaScript, DSH Agent, and Storage nodes execute against the real Host. Webhook, Schedule, DSH Event, and standalone LLM nodes are explicitly disabled until their providers are implemented. See [Capability status](#capability-status).
+> The current release is `0.1.0` Alpha with the Host architecture upgraded to v2. Manual Trigger, branching, sorting, aggregation, JSON, wait, HTTP, JavaScript, DSH Agent, and Storage nodes execute against the real Host. Webhook, Schedule, DSH Event, and standalone LLM nodes remain explicitly disabled until their providers are implemented.
 
 ## Highlights
 
 - **Native DSH execution**: `dsh.agent` starts child agents through `ctx.subagents.start()` and discovers Provider, Model, and capability data from the active Host.
 - **Visual DAG authoring**: typed named ports, multiple outputs, connection validation, multi-select, zoom, pan, compatible-node discovery, and port previews.
-- **Multiple workflows**: manage definitions, publication state, triggers, and recent runs from one sidebar; UI changes are persisted immediately.
+- **Multiple workflows**: manage definitions, triggers, and recent runs from one sidebar; UI changes are persisted immediately.
 - **Observable runs**: inspect node status, duration, inputs, outputs, logs, errors, and artifacts through one Details UI.
 - **Node development loop**: creation-mode tools and Node Lab support authoring, real execution tests, content-hash versions, hot reload, and test-gated persistence.
-- **Isolated runtime data**: workspace state, workflow files, and outputs live under `~/.dsh_agent_workflow/`, outside both the DSH checkout and plugin directory.
+- **Isolated runtime data**: workflow, execution, and output files live under `~/.dsh_agent_workflow/`, outside both the DSH checkout and plugin directory.
+- **AI review first**: Agent-generated workflows enter Review before manual tuning; diagnostics and stable diffs remain visible, and human changes mark the draft as edited.
 
 ## UI and interaction model
 
 ### 1. Enter RunFlow from DSH
 
-Hover over **RunFlow** in the DSH sidebar to open a multi-workflow summary showing each Trigger, publication state, and most recent result. Click the entry to open the floating workspace.
+Hover over **RunFlow** in the DSH sidebar to open a multi-workflow summary showing each Trigger and most recent result. Click the entry to open the floating workspace.
 
 ![RunFlow multi-workflow summary in the DSH sidebar](./output/playwright/runflow-host-sidebar-hover.png)
 
@@ -37,29 +38,34 @@ The workspace can be moved, resized, maximized, minimized, and restored. Clickin
 
 The overview creates, searches, filters, duplicates, and deletes workflows. The left sidebar keeps Trigger and recent-run summaries visible. A workflow created or edited in the UI is written to disk immediately, so running it once does not make it disappear.
 
-![Workflow management page](./output/playwright/docs-workflow-management.png)
+![Workflows tab with workflow state](./output/playwright/runflow-workflows-desktop.png)
 
 Basic flow:
 
 1. Select **Create workflow**.
-2. Choose the workflow in the sidebar, then edit its name and state in the header.
-3. Select **Save**, or run it directly; RunFlow re-confirms persistence before execution.
+2. Choose the workflow in the sidebar, then edit its name in the header.
+3. Changes auto-save to the workflow's own file; RunFlow re-confirms persistence before execution.
 4. Open **Executions** to inspect historical runs and per-node results.
 
 ### 3. Edit the canvas and add nodes
 
-![Workflow editor](./output/playwright/docs-workflow-editor.png)
+![Nodes tab with the grouped node library](./output/playwright/comfy-sidebar-nodes.png)
 
 The canvas follows familiar automation-editor interactions while retaining the DSH blue visual language:
 
 - Left-drag on empty space to marquee-select multiple nodes.
-- Hold `Space` and drag to pan; use the wheel or controls to zoom and fit the view.
+- Hold the right mouse button and drag to pan; use the wheel or controls to zoom and fit the view.
+- Use the left **Nodes** tab to search or collapse groups, click to insert, or drag a node to an exact canvas position.
 - Right-click empty space, or select **Add node**, to open the Node Library.
 - Select a node to edit it in the Inspector; duplicate and delete actions live in the Inspector header.
 - Drag an input or output port into empty space to list only directionally and type-compatible nodes.
 - Hover a port for roughly 500ms to see a bounded preview; click the port or expand action for complete data.
 
-![Searchable Node Library](./output/playwright/docs-node-library.png)
+![Visible DSH-blue selection marquee](./output/playwright/comfy-selection-marquee.png)
+
+![Resizable parameter inspector and typed ports](./output/playwright/runflow-editor-desktop.png)
+
+Custom providers can declare their own hierarchy with an optional slash-delimited `group`, such as `Acme Tools/Images`. Omitting it keeps the legacy `category` fallback. Node Lab is reserved for source authoring rather than node discovery.
 
 ### 4. Configure a DSH Agent node
 
@@ -95,7 +101,7 @@ Node Details exposes five views: **Overview, Input, Output, Logs, and Files**. F
 
 ### 6. Develop nodes and scripts in Node Lab
 
-Creation mode exposes **Node Lab** in the editor header. It reads the Host source library under `nodes/` and `script/`, shows a content-hash revision after save, and schedules a serial hot reload.
+The **Nodes** tab exposes **Node Lab** in its footer. In creation mode it reads the Host source library under `nodes/` and `script/`, shows a content-hash revision after save, and schedules a serial hot reload.
 
 - The lightweight editor supports line numbers, Tab indentation, `Ctrl+Space`, and dot-triggered basic completion.
 - Completion covers `ctx.flow`, `ctx.flowScript`, `ctx.agents`, `ctx.llm`, `ctx.tools`, `execution.node.config`, logs, and intermediate artifacts.
@@ -107,10 +113,9 @@ RunFlow requires Node.js `^22.19.0` or `>=24.0.0` and DeepSeek Harness `0.1.2-al
 
 ### Local link installation
 
-Build the plugin first:
+Start in the `dsh-flow` repository root, with the `deepseek-harness` repository in the same parent directory. Build the plugin first:
 
 ```powershell
-cd D:\A-AiProject\dsh-flow
 pnpm install
 pnpm build
 ```
@@ -118,8 +123,8 @@ pnpm build
 Then add it to the DSH Web profile from the DeepSeek Harness repository:
 
 ```powershell
-cd D:\A-AiProject\deepseek-harness
-pnpm dsh plugin --profile web add "link:D:/A-AiProject/dsh-flow"
+cd ../deepseek-harness
+pnpm dsh plugin --profile web add "link:../dsh-flow"
 ```
 
 Restart the Web profile. **RunFlow** will appear in the DSH sidebar. The bundle injects this default configuration:
@@ -196,6 +201,7 @@ export default defineRunFlowNodePlugin({
     title: 'Transform',
     description: 'Transform incoming JSON',
     category: 'data',
+    group: 'Example/Data transforms',
     color: '#4A5FA8',
     icon: 'braces',
     inputs: [{ id: 'source', type: 'json', required: true }],
@@ -257,10 +263,10 @@ Runtime-owned state is isolated from the DSH checkout and plugin installation:
 ```text
 ~/.dsh_agent_workflow/
 ├─ data/
-│  ├─ workspace.json
 │  ├─ workflows/
-│  │  └─ <workflow-id>.workflow.json
-│  └─ .legacy-import-v1.json
+│  │  └─ <workflow-id>-<hash>.workflow.json
+│  └─ executions/
+│     └─ <execution-id>-<hash>.execution.json
 └─ output/
 ```
 
@@ -284,7 +290,7 @@ Each execution receives an isolated directory:
       └─ 001-<label>.json
 ```
 
-The first upgrade copies legacy `<process.cwd()>/data/runflow/workspace.json` and workflow files into the new location without deleting the originals. Explicit `storageDir`, `workflowsDir`, and `outputDir` values are always respected.
+Backend v2 no longer maintains `workspace.json` and intentionally provides no migration for development-state data. Each workflow and execution has one authoritative file written with a temporary file plus atomic rename. Explicit `storageDir`, `workflowsDir`, `executionsDir`, and `outputDir` values are always respected.
 
 ## Configuration
 
@@ -293,8 +299,9 @@ The first upgrade copies legacy `<process.cwd()>/data/runflow/workspace.json` an
 | `maxParallelNodes` | `4` | Maximum runnable nodes per batch, from 1 to 64 |
 | `defaultTimeoutMs` | `30000` | Default node timeout, from 100 to 3,600,000ms |
 | `outputDir` | `~/.dsh_agent_workflow/output` | Default execution output root |
-| `storageDir` | `~/.dsh_agent_workflow/data` | Workspace data directory |
+| `storageDir` | `~/.dsh_agent_workflow/data` | Parent directory for v2 repositories |
 | `workflowsDir` | `<storageDir>/workflows` | File-backed workflow directory |
+| `executionsDir` | `<storageDir>/executions` | File-backed execution history directory |
 | `nodesDir` | `<plugin>/nodes` | Node Provider and draft directory |
 | `scriptsDir` | `<plugin>/script` | Script Provider directory |
 | `watchFiles` | `true` | Watch workflow, Node, and Script files |
@@ -308,6 +315,11 @@ The first upgrade copies legacy `<process.cwd()>/data/runflow/workspace.json` an
 | `trigger.manual` | Executable | Manual Host DAG entry |
 | `builtin.condition` | Executable | Conditional routing |
 | `builtin.set` | Executable | Field mapping and transformation |
+| `builtin.switch` | Executable | Named match/fallback multi-output routing |
+| `builtin.sort` | Executable | Sort JSON arrays by nested fields |
+| `builtin.aggregate` | Executable | count / sum / average / min / max |
+| `builtin.json-parse` / `builtin.json-stringify` | Executable | Typed text/JSON conversion |
+| `builtin.wait` / `builtin.stop-error` | Executable | Cancellable wait and explicit failure |
 | `dsh.agent` | Executable | `ctx.subagents.start()` with dynamic Provider / Model |
 | `script.javascript` | Executable | `ctx.flowScript` → DSH `run_code` |
 | `http.request` | Executable | Host `fetch()` with method, headers, and JSON/string body |
@@ -339,7 +351,8 @@ script/                 Script executor, run_code channel, Host Script plugins
 src/authoring-tools.ts  Creation-mode scoped tools and skill
 src/directory-plugin-loader.ts  Content hashing and serial hot reload
 src/engine.ts           Typed-port validation, DAG, retry / timeout / cancel
-src/flow-service.ts     ctx.flow, Agent adapter, Provider snapshot
+src/flow-service.ts     v2 application facade, execution coordination, Provider snapshot
+src/backend/v2/         Workflow/Execution repositories and DSH Agent adapter
 src/remote-service.ts   Agent-authorized start / poll / cancel Remote
 src/client/             Floating workspace, canvas, Inspector, Details UI
 ```

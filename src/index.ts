@@ -13,7 +13,7 @@ import { installRunFlowAuthoring } from './authoring-tools.ts'
 import { FlowService } from './flow-service.ts'
 import { RunFlowRemoteService } from './remote-service.ts'
 import { RUNFLOW_HOST } from './remote-contract.ts'
-import { migrateLegacyRunFlowRuntime, resolveRunFlowRuntimePaths } from './runtime-paths.ts'
+import { resolveRunFlowRuntimePaths } from './runtime-paths.ts'
 import scriptPlugin from '../script/index.ts'
 import nodeExecutorPlugin from '../nodes/index.ts'
 
@@ -27,6 +27,7 @@ export * from './output-store.ts'
 export * from './plugin-sdk.ts'
 export * from './plugin-sources.ts'
 export * from './runtime-paths.ts'
+export * from './backend/v2/file-repositories.ts'
 export * from '../script/index.ts'
 export * from '../nodes/index.ts'
 
@@ -42,6 +43,7 @@ export const Config: z<Config> = z.object({
   nodesDir: z.string(),
   scriptsDir: z.string(),
   workflowsDir: z.string(),
+  executionsDir: z.string(),
   storageDir: z.string(),
   watchFiles: z.boolean().default(true),
   enableAuthoringTools: z.boolean().default(true),
@@ -53,16 +55,6 @@ export async function apply(ctx: Context, config: Config = {}): Promise<void> {
   const nodesDir = resolve(config.nodesDir ?? join(pluginRoot, 'nodes'))
   const scriptsDir = resolve(config.scriptsDir ?? join(pluginRoot, 'script'))
   const runtimePaths = resolveRunFlowRuntimePaths(config)
-  if (config.storageDir === undefined && config.workflowsDir === undefined) {
-    const migration = migrateLegacyRunFlowRuntime({ cwd: process.cwd(), pluginRoot })
-    if (migration.importedWorkspace !== undefined || migration.importedWorkflows.length > 0) {
-      ctx.logger.info(
-        'RunFlow imported legacy state into %s (%d workflow files)',
-        migration.paths.dataDir,
-        migration.importedWorkflows.length,
-      )
-    }
-  }
   const flow = new FlowService(ctx, {
     ...config,
     nodesDir,
@@ -70,6 +62,7 @@ export async function apply(ctx: Context, config: Config = {}): Promise<void> {
     outputDir: runtimePaths.outputDir,
     storageDir: runtimePaths.dataDir,
     workflowsDir: runtimePaths.workflowsDir,
+    executionsDir: runtimePaths.executionsDir,
   })
   new RunFlowRemoteService(ctx)
   ctx.typert.register(RUNFLOW_HOST)

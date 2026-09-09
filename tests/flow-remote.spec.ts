@@ -53,6 +53,7 @@ describe('RunFlow Host Remote', () => {
     })
 
     const workspace = new RunFlowRemoteService(ctx).workspace({ id: 'agent-catalog' } as Agent)
+    expect(workspace.apiVersion).toBe(2)
     expect(workspace.subagentProviders).toEqual([{
       id: 'capable-spawn',
       inheritsParentContext: true,
@@ -168,7 +169,7 @@ describe('RunFlow Host Remote', () => {
     expect(execution.nodes[0]?.status).toBe('CANCELLED')
 
   })
-  it('persists workflow status and execution history for the Host workspace', async () => {
+  it('persists workflow and execution history as independent v2 repository files', async () => {
     const root = await testRoot()
     const storageDir = join(root, 'workspace')
     const workflowsDir = join(root, 'workflows')
@@ -187,14 +188,15 @@ describe('RunFlow Host Remote', () => {
     const saved = remote.save(agent, definition)
     expect(saved.version).toBe(1)
     expect(await readdir(workflowsDir)).toEqual([expect.stringMatching(/\.workflow\.json$/)])
-    expect(remote.publish(agent, definition.id, true).published).toBe(true)
     const receipt = remote.start(agent, { definition: saved, input: { ok: true } })
     await settled(remote, agent, receipt.executionId)
+    expect(await readdir(join(storageDir, 'executions'))).toEqual([expect.stringMatching(/\.execution\.json$/)])
+    expect(await readdir(storageDir)).toEqual(['executions'])
 
     const restoredContext = new Context()
     new FlowService(restoredContext, { outputDir: join(root, 'output-2'), nodesDir: join(root, 'nodes-2'), storageDir, workflowsDir })
     const restored = new RunFlowRemoteService(restoredContext).workspace(agent)
-    expect(restored.workflows).toEqual([expect.objectContaining({ id: definition.id, published: true })])
+    expect(restored.workflows).toEqual([expect.objectContaining({ id: definition.id })])
     expect(restored.executions).toEqual([expect.objectContaining({ workflowId: definition.id, status: 'SUCCESS' })])
   })
 })

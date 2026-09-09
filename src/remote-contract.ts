@@ -27,6 +27,7 @@ export interface RunFlowStartReceipt {
 }
 
 export interface RunFlowWorkspaceSnapshot {
+  apiVersion: 2
   workflows: WorkflowDefinition[]
   executions: WorkflowExecution[]
   /** Live Host registry, including dynamically loaded Node and Script providers. */
@@ -45,7 +46,6 @@ export interface RunFlowRemoteNamespace {
   workspace(agentId: string): Promise<RemoteResult<RunFlowWorkspaceSnapshot>>
   save(agentId: string, definition: WorkflowDefinition): Promise<RemoteResult<WorkflowDefinition>>
   deleteWorkflow(agentId: string, workflowId: string): Promise<RemoteResult<boolean>>
-  publish(agentId: string, workflowId: string, published: boolean): Promise<RemoteResult<WorkflowDefinition>>
   start(agentId: string, request: RunFlowStartRequest): Promise<RemoteResult<RunFlowStartReceipt>>
   execution(agentId: string, executionId: string): Promise<RemoteResult<WorkflowExecution | null>>
   cancel(agentId: string, executionId: string): Promise<RemoteResult<boolean>>
@@ -121,15 +121,6 @@ export const RUNFLOW_REMOTE = {
       id: 'dsh-runflow#runflow/remove', service: 'runflowRemote', namespace: 'runflow', method: 'deleteWorkflow',
       invocation: { kind: 'direct' }, scope: { context: 'agent', wire: 'agentId' }, parameters: [agentParameter, stringParameter('workflowId', 'dsh-runflow#WorkflowId')],
       result: codec('dsh-runflow#Boolean', booleanSchema),
-    },
-    {
-      id: 'dsh-runflow#runflow/publish', service: 'runflowRemote', namespace: 'runflow', method: 'publish',
-      invocation: { kind: 'direct' }, scope: { context: 'agent', wire: 'agentId' }, parameters: [
-        agentParameter,
-        stringParameter('workflowId', 'dsh-runflow#WorkflowId'),
-        { name: 'published', wire: 'published', source: 'json', codec: codec('dsh-runflow#Boolean', booleanSchema) },
-      ],
-      result: codec('dsh-runflow#WorkflowDefinition', jsonSchema),
     },
     {
       id: 'dsh-runflow#runflow/start', service: 'runflowRemote', namespace: 'runflow', method: 'start',

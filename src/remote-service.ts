@@ -70,6 +70,7 @@ export class RunFlowRemoteService extends TypertRemoteService {
           }]
     }) ?? []
     return {
+      apiVersion: 2,
       workflows: this.ctx.flow.listWorkflows(),
       executions: this.ctx.flow.listExecutions(undefined, 200),
       nodes: this.ctx.flow.listNodes(),
@@ -91,11 +92,6 @@ export class RunFlowRemoteService extends TypertRemoteService {
   @Remote
   deleteWorkflow(agent: Agent, workflowId: string): boolean {
     return this.ctx.flow.deleteWorkflow(workflowId)
-  }
-
-  @Remote
-  publish(agent: Agent, workflowId: string, published: boolean): WorkflowDefinition {
-    return this.ctx.flow.setWorkflowPublished(workflowId, published)
   }
 
   @Remote

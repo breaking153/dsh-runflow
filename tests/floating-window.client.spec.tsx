@@ -25,6 +25,8 @@ let root: Root
 beforeEach(() => {
   ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   Object.defineProperty(globalThis, 'PointerEvent', { configurable: true, value: FixturePointerEvent })
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 })
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 768 })
   localStorage.clear()
   host = document.createElement('div')
   document.body.append(host)
@@ -66,7 +68,7 @@ describe('RunFlow floating window controls', () => {
     expect(onToggleMaximize).toHaveBeenCalledOnce()
     await act(async () => dialog.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })))
     expect(onMinimize).toHaveBeenCalledOnce()
-    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="关闭 RunFlow"]')!.click())
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Close RunFlow"]')!.click())
     expect(onClose).toHaveBeenCalledOnce()
   })
 
@@ -84,5 +86,21 @@ describe('RunFlow floating window controls', () => {
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="关闭已最小化的 RunFlow"]')!.click())
     expect(onRestore).toHaveBeenCalledOnce()
     expect(onClose).toHaveBeenCalledOnce()
+  })
+
+  it('can shrink to a compact desktop width without exceeding the viewport', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 800 })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 700 })
+    await act(async () => root.render(<FloatingRunFlowWindow
+      mode="floating"
+      closing={false}
+      onMinimize={() => undefined}
+      onToggleMaximize={() => undefined}
+      onClose={() => undefined}
+    />))
+
+    const dialog = host.querySelector<HTMLElement>('[role="dialog"]')!
+    expect(dialog.style.width).toBe('520px')
+    expect(Number.parseFloat(dialog.style.left) + Number.parseFloat(dialog.style.width)).toBeLessThanOrEqual(window.innerWidth)
   })
 })

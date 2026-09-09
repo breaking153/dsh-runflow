@@ -20,6 +20,38 @@ function successfulExecution(): WorkflowExecution {
 }
 
 describe('RunFlow node library', () => {
+  it('accepts nested custom groups and rejects ambiguous group paths', async () => {
+    const nodesDir = await mkdtemp(join(tmpdir(), 'dsh-runflow-node-groups-'))
+    try {
+      const library = new FlowNodeLibrary(nodesDir, async () => ({ ok: true }))
+      const input = {
+        descriptor: {
+          type: 'acme.image-caption',
+          title: 'Image caption',
+          description: 'Describe an image.',
+          category: 'ai' as const,
+          group: 'Acme Tools/Images',
+          color: '#2563EB',
+          icon: 'bot',
+          inputs: [{ id: 'image', type: 'image' as const }],
+          outputs: [{ id: 'caption', type: 'text' as const }],
+        },
+        program: 'return {caption:"ok"}',
+      }
+      expect(library.upsertDraft(input).descriptor.group).toBe('Acme Tools/Images')
+      expect(() => library.upsertDraft({
+        ...input,
+        descriptor: { ...input.descriptor, type: 'acme.bad-group', group: 'Acme Tools//Images' },
+      })).toThrow('descriptor.group')
+      expect(() => library.upsertDraft({
+        ...input,
+        descriptor: { ...input.descriptor, type: 'acme.control-group', group: 'Acme Tools/Images\nHidden' },
+      })).toThrow('descriptor.group')
+    } finally {
+      await rm(nodesDir, { recursive: true, force: true })
+    }
+  })
+
   it('requires the current in-memory revision to pass before solidifying it', async () => {
     const nodesDir = await mkdtemp(join(tmpdir(), 'dsh-runflow-nodes-'))
     const executeProgram = async () => ({ ok: true })

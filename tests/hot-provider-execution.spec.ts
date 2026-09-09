@@ -11,8 +11,12 @@ import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as flowPlugin from '../src/index.ts'
 
+const contexts: Context[] = []
 const roots: string[] = []
-afterEach(async () => Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))))
+afterEach(async () => {
+  await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
+  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
+})
 
 function source(type: string, version: string): string {
   return `export default {
@@ -39,6 +43,7 @@ describe('file-backed providers execute their latest loaded behavior', () => {
     const nodesDir = join(root, 'nodes')
     const scriptsDir = join(root, 'script')
     const ctx = new Context()
+    contexts.push(ctx)
     new AgentRegistry(ctx)
     new LlmRuntime(ctx)
     new SubagentRuntime(ctx)
@@ -87,6 +92,5 @@ describe('file-backed providers execute their latest loaded behavior', () => {
     expect(nodeV2.output).toEqual({ version: 'node-v2', nodeType: 'fixture.hot-node' })
     expect(scriptV2.output).toEqual({ version: 'script-v2', nodeType: 'fixture.hot-script' })
     expect(nodeV2.nodes[0]?.artifacts?.some(artifact => artifact.kind === 'intermediate')).toBe(true)
-    await ctx.fiber.dispose()
   })
 })

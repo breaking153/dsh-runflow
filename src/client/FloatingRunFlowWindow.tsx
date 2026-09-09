@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Poin
 import { Grip, Maximize2, MessageSquare, Minimize2, X } from 'lucide-react'
 import { FlowApp } from './App.tsx'
 import { RunFlowMark } from './RunFlowLogo.tsx'
+import { useRunFlowLocale } from './locale.ts'
 
 export type RunFlowWindowMode = 'floating' | 'maximized'
 
@@ -16,8 +17,8 @@ type ResizeDirection = 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw'
 
 const GEOMETRY_KEY = 'dsh-runflow:window-geometry'
 const EDGE_GAP = 8
-const MIN_WIDTH = 680
-const MIN_HEIGHT = 440
+const MIN_WIDTH = 520
+const MIN_HEIGHT = 360
 
 function defaultGeometry(): RunFlowWindowGeometry {
   const viewportWidth = typeof window === 'undefined' ? 1440 : window.innerWidth
@@ -88,6 +89,7 @@ interface FloatingRunFlowWindowProps {
 }
 
 export function FloatingRunFlowWindow({ mode, closing, onMinimize, onToggleMaximize, onClose }: FloatingRunFlowWindowProps) {
+  const { t } = useRunFlowLocale()
   const windowRef = useRef<HTMLElement>(null)
   const [geometry, setGeometry] = useState(restoredGeometry)
   const [interacting, setInteracting] = useState(false)
@@ -159,7 +161,7 @@ export function FloatingRunFlowWindow({ mode, closing, onMinimize, onToggleMaxim
     style={style}
     role="dialog"
     aria-modal="false"
-    aria-label="DSH RunFlow 浮动工作台"
+    aria-label="DSH RunFlow"
     tabIndex={-1}
     onKeyDown={event => {
       if (event.key === 'Escape') {
@@ -172,11 +174,11 @@ export function FloatingRunFlowWindow({ mode, closing, onMinimize, onToggleMaxim
       if ((event.target as HTMLElement).closest('button') === null) onToggleMaximize()
     }}>
       <span className="runflow-window-mark"><RunFlowMark size={19} /></span>
-      <span className="runflow-window-title"><strong>RunFlow</strong><small>{mode === 'maximized' ? '专注模式' : '拖拽标题栏移动 · 拖拽边缘缩放 · DSH 会话仍可操作'}</small></span>
+      <span className="runflow-window-title"><strong>RunFlow</strong><small>{mode === 'maximized' ? t('focusMode') : t('floatingHint')}</small></span>
       <span className="runflow-window-actions">
-        <button className="runflow-session-switch" onClick={onMinimize} aria-label="返回 DSH 会话并最小化 RunFlow" title="返回 DSH 会话（Esc）"><MessageSquare size={14} /><span>返回会话</span></button>
-        <button onClick={onToggleMaximize} aria-label={mode === 'maximized' ? '还原 RunFlow 浮动窗口' : '最大化 RunFlow'} title={mode === 'maximized' ? '还原浮动窗口' : '最大化'}>{mode === 'maximized' ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button>
-        <button onClick={onClose} aria-label="关闭 RunFlow" title="关闭 RunFlow"><X size={16} /></button>
+        <button className="runflow-session-switch" onClick={onMinimize} aria-label={t('returnSession')} title={`${t('returnSession')} (Esc)`}><MessageSquare size={14} /><span>{t('returnSession')}</span></button>
+        <button onClick={onToggleMaximize} aria-label={mode === 'maximized' ? t('restore') : t('maximize')} title={mode === 'maximized' ? t('restore') : t('maximize')}>{mode === 'maximized' ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button>
+        <button onClick={onClose} aria-label={t('close')} title={t('close')}><X size={16} /></button>
       </span>
     </header>
     <div className="runflow-window-body"><FlowApp onClose={onClose} /></div>

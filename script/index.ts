@@ -123,8 +123,16 @@ export class FlowScriptService extends Service {
       color: '#facc15',
       icon: 'square-code',
       available: true,
-      inputs: [{ id: 'input', label: 'input', type: 'any' }],
-      outputs: [{ id: 'output', label: 'output', type: 'any' }],
+      inputs: [
+        { id: 'input', label: 'flow', type: 'flow' },
+        { id: 'json', label: 'json', type: 'json' },
+        { id: 'text', label: 'text', type: 'text' },
+      ],
+      outputs: [
+        { id: 'output', label: 'json', type: 'json' },
+        { id: 'text', label: 'text', type: 'text' },
+        { id: 'flow', label: 'flow', type: 'flow' },
+      ],
       configSchema: {
         type: 'object',
         properties: {

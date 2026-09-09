@@ -15,6 +15,24 @@ function provider(type: string, execute: WorkflowNodeDefinition['execute']): Wor
 }
 
 describe('workflow engine', () => {
+  it('preserves an already-cancelled parent signal without executing a node', async () => {
+    let executed = false
+    const node = provider('cancel-probe', async () => { executed = true; return null })
+    const signal = AbortSignal.abort('cancelled before dispatch')
+    const execution = await executeWorkflow(workflow([
+      { id: 'probe', type: node.type, config: {} },
+    ], []), { signal }, {
+      maxParallelNodes: 1,
+      defaultTimeoutMs: 500,
+      resolveNode: () => node,
+    })
+
+    expect(execution.status).toBe('CANCELLED')
+    expect(execution.error).toBe('cancelled before dispatch')
+    expect(execution.nodes[0]).toMatchObject({ status: 'CANCELLED', attempts: 0 })
+    expect(executed).toBe(false)
+  })
+
   it('rejects cycles before executing nodes', () => {
     const issues = validateWorkflow(workflow([
       { id: 'a', type: 'echo', config: {} },

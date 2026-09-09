@@ -2,7 +2,7 @@ export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
 export type JsonObject = { [key: string]: JsonValue }
 
-export type WorkflowPortType = 'any' | 'json' | 'text' | 'number' | 'boolean' | 'file' | 'files' | 'image' | 'audio' | 'table' | 'error'
+export type WorkflowPortType = 'any' | 'flow' | 'json' | 'text' | 'number' | 'boolean' | 'file' | 'files' | 'image' | 'audio' | 'table' | 'error'
 
 export interface WorkflowPortDescriptor {
   id: string
@@ -60,6 +60,60 @@ export interface WorkflowEdge {
   condition?: boolean
 }
 
+export interface WorkflowVisualGroup {
+  id: string
+  label: string
+  position: WorkflowPosition
+  width: number
+  height: number
+  nodeIds: string[]
+}
+
+export interface WorkflowReroute {
+  id: string
+  position: WorkflowPosition
+}
+
+export interface WorkflowVisualEdge {
+  id: string
+  source: string
+  target: string
+  sourceHandle?: string
+  targetHandle?: string
+}
+
+export interface WorkflowSubflowPort {
+  id: string
+  label: string
+  type: WorkflowPortType
+  nodeId: string
+  nodePortId: string
+}
+
+export interface WorkflowSubflowDefinition {
+  id: string
+  label: string
+  position: WorkflowPosition
+  nodes: WorkflowNode[]
+  edges: WorkflowEdge[]
+  inputs: WorkflowSubflowPort[]
+  outputs: WorkflowSubflowPort[]
+  groups?: WorkflowVisualGroup[]
+  reroutes?: WorkflowReroute[]
+  visualEdges?: WorkflowVisualEdge[]
+}
+
+/** Editor-only metadata; Host execution consumes the flattened graph above. */
+export interface WorkflowUiState {
+  schemaVersion: 1
+  groups: WorkflowVisualGroup[]
+  reroutes: WorkflowReroute[]
+  visualEdges: WorkflowVisualEdge[]
+  subflows?: WorkflowSubflowDefinition[]
+  linksVisible?: boolean
+  minimapVisible?: boolean
+}
+
 export interface WorkflowDefinition {
   id: string
   name: string
@@ -69,9 +123,7 @@ export interface WorkflowDefinition {
   outputDir?: string
   createdAt?: string
   updatedAt?: string
-  published?: boolean
-  publishedVersion?: number
-  publishedAt?: string
+  ui?: WorkflowUiState
 }
 
 export type ExecutionStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'CANCELLED'
@@ -116,6 +168,8 @@ export interface WorkflowNodeDescriptor {
   title: string
   description: string
   category: NodeCategory
+  /** Optional ComfyUI-style slash-delimited presentation path, e.g. `DSH/Agents/Research`. */
+  group?: string
   color: string
   icon: string
   configSchema?: JsonObject
@@ -212,7 +266,9 @@ export interface FlowConfig {
   scriptsDir?: string
   /** Defaults to ~/.dsh_agent_workflow/data/workflows. */
   workflowsDir?: string
-  /** Directory containing workspace.json; defaults to ~/.dsh_agent_workflow/data. */
+  /** Defaults to ~/.dsh_agent_workflow/data/executions. */
+  executionsDir?: string
+  /** Parent data directory used when repository directories are not explicit. */
   storageDir?: string
   watchFiles?: boolean
   enableAuthoringTools?: boolean

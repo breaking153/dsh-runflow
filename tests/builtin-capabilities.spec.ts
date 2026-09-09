@@ -19,6 +19,7 @@ function context(
   config: Record<string, JsonValue>,
   input: JsonValue,
   writeIntermediate: NodeExecutionContext['writeIntermediate'],
+  inputs: Record<string, JsonValue> = {},
 ): NodeExecutionContext {
   return {
     executionId: 'execution-1',
@@ -26,7 +27,7 @@ function context(
     workflow: { id: 'flow', name: 'Flow', version: 1, nodes: [], edges: [] },
     node: { id: 'node-1', type, config },
     input,
-    inputs: {},
+    inputs,
     vars: {},
     signal: new AbortController().signal,
     outputDir: 'output/runflow/flow/execution-1/nodes/node-1',
@@ -37,6 +38,17 @@ function context(
 }
 
 describe('real builtin node capabilities', () => {
+  it('emits a typed flow signal and routes named inputs through common utility nodes', async () => {
+    const writeIntermediate = vi.fn()
+    const trigger = await node('trigger.manual').execute(context('trigger.manual', {}, { orderId: 7 }, writeIntermediate))
+    expect(trigger).toEqual(expect.objectContaining({ $runflow: 'flow', trigger: 'manual', payload: { orderId: 7 } }))
+
+    const merged = await node('builtin.merge').execute(context(
+      'builtin.merge', {}, {}, writeIntermediate, { left: { first: true }, right: { second: true } },
+    ))
+    expect(merged).toEqual({ first: true, second: true })
+  })
+
   it('does not advertise trigger listeners that are not installed', () => {
     expect(node('trigger.manual').available).not.toBe(false)
     expect(node('trigger.webhook').available).toBe(false)
@@ -111,5 +123,56 @@ describe('real builtin node capabilities', () => {
       },
     })
     vi.unstubAllGlobals()
+  })
+
+  it('routes Switch values through named match and fallback outputs', async () => {
+    const writeIntermediate = vi.fn()
+    const matched = await node('builtin.switch').execute(context(
+      'builtin.switch',
+      { rules: [{ path: 'priority', operator: 'equals', value: 'high' }] },
+      { priority: 'high', id: 7 },
+      writeIntermediate,
+    ))
+    const fallback = await node('builtin.switch').execute(context(
+      'builtin.switch',
+      { rules: [{ path: 'priority', operator: 'equals', value: 'high' }] },
+      { priority: 'low', id: 8 },
+      writeIntermediate,
+    ))
+
+    expect(matched).toEqual({ $runflow: 'port-outputs', outputs: { match: { priority: 'high', id: 7 }, index: 0 } })
+    expect(fallback).toEqual({ $runflow: 'port-outputs', outputs: { fallback: { priority: 'low', id: 8 }, index: -1 } })
+  })
+
+  it('provides typed Sort, Aggregate, and JSON transform nodes', async () => {
+    const writeIntermediate = vi.fn()
+    await expect(node('builtin.sort').execute(context(
+      'builtin.sort', { path: 'score', order: 'desc' },
+      [{ score: 2 }, { score: 9 }, { score: 4 }], writeIntermediate,
+    ))).resolves.toEqual([{ score: 9 }, { score: 4 }, { score: 2 }])
+
+    await expect(node('builtin.aggregate').execute(context(
+      'builtin.aggregate', { operation: 'average', path: 'score' },
+      [{ score: 2 }, { score: 8 }], writeIntermediate,
+    ))).resolves.toEqual({ $runflow: 'port-outputs', outputs: { result: 5, items: [{ score: 2 }, { score: 8 }] } })
+
+    const parsed = await node('builtin.json-parse').execute(context(
+      'builtin.json-parse', {}, '{"ready":true}', writeIntermediate,
+    ))
+    expect(parsed).toEqual({ ready: true })
+    await expect(node('builtin.json-stringify').execute(context(
+      'builtin.json-stringify', { pretty: true }, parsed, writeIntermediate,
+    ))).resolves.toBe('{\n  "ready": true\n}')
+  })
+
+  it('advertises the v2 utility catalog with concrete port types', () => {
+    const catalog = builtinNodeDefinitions(async () => ({ agent: true }))
+    expect(catalog.map(item => item.type)).toEqual(expect.arrayContaining([
+      'builtin.switch', 'builtin.sort', 'builtin.aggregate',
+      'builtin.json-parse', 'builtin.json-stringify', 'builtin.wait', 'builtin.stop-error',
+    ]))
+    for (const definition of catalog.filter(item => item.type.startsWith('builtin.'))) {
+      expect([...(definition.inputs ?? []), ...(definition.outputs ?? [])].every(port => port.type !== 'any')).toBe(true)
+    }
   })
 })

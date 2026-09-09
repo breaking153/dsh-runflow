@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { CircleAlert, Code2, FileCode2, LoaderCircle, Plus, Save, X } from 'lucide-react'
 import type { RunFlowPluginSource, RunFlowPluginSourceKind } from '../plugin-sources.ts'
 import { LightCodeEditor } from './LightCodeEditor.tsx'
-import { getFlowRuntime, useFlowRuntime } from './runtime.ts'
+import { getRunFlowClientContext, getRunFlowGateway, useFlowRuntime } from './runtime.ts'
 import { useFlowStore } from './store.ts'
 
 function template(kind: RunFlowPluginSourceKind, type: string): string {
@@ -76,12 +76,12 @@ export function SourceWorkbench() {
     setError(undefined)
   }
   const load = async (): Promise<void> => {
-    const runtime = getFlowRuntime()
-    const agentId = runtime?.currentAgentId()
-    if (runtime === undefined || agentId === undefined) return
+    const gateway = getRunFlowGateway()
+    const context = getRunFlowClientContext()
+    if (gateway === undefined || context === undefined) return
     setLoading(true); setError(undefined)
     try {
-      const next = await runtime.sources(agentId)
+      const next = await gateway.sources.list(context)
       setSources(next)
       const current = next.find(source => source.kind + ':' + source.name === selectedKey) ?? next[0]
       if (current !== undefined) choose(current)
@@ -111,12 +111,12 @@ export function SourceWorkbench() {
     setError(undefined)
   }
   const save = async (): Promise<void> => {
-    const runtime = getFlowRuntime()
-    const agentId = runtime?.currentAgentId()
-    if (runtime === undefined || agentId === undefined) { setError('请先打开 DSH 主会话'); return }
+    const gateway = getRunFlowGateway()
+    const context = getRunFlowClientContext()
+    if (gateway === undefined || context === undefined) { setError('请先打开 DSH 主会话'); return }
     setSaving(true); setError(undefined)
     try {
-      const saved = await runtime.saveSource(agentId, { kind, name, content })
+      const saved = await gateway.sources.save(context, { kind, name, content })
       setSources(current => [saved, ...current.filter(source => source.kind + ':' + source.name !== saved.kind + ':' + saved.name)])
       choose(saved)
       await new Promise(resolve => window.setTimeout(resolve, 260))

@@ -347,6 +347,7 @@ export async function executeWorkflow(
   const parentSignal = options.signal
   const relayAbort = (): void => controller.abort(parentSignal?.reason)
   parentSignal?.addEventListener('abort', relayAbort, { once: true })
+  if (parentSignal?.aborted) relayAbort()
   const records = new Map<string, NodeExecutionRecord>(definition.nodes.map(node => [node.id, {
     nodeId: node.id,
     status: 'WAITING',

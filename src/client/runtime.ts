@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
+import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkflowDefinition, WorkflowExecution } from '../contracts.ts'
 import type { RunFlowPluginSource, SaveRunFlowPluginSourceRequest } from '../plugin-sources.ts'
 import {
@@ -10,13 +11,17 @@ import {
   type RunFlowStartRequest,
   type RunFlowWorkspaceSnapshot,
 } from '../remote-contract.ts'
+import {
+  createRunFlowGatewayV2Adapter,
+  type RunFlowClientContext,
+  type RunFlowGatewayV2,
+} from './application/runflow-gateway.ts'
 
 export interface FlowRuntimeClient {
   currentAgentId(): string | undefined
   workspace(agentId: string): Promise<RunFlowWorkspaceSnapshot>
   save(agentId: string, definition: WorkflowDefinition): Promise<WorkflowDefinition>
   remove(agentId: string, workflowId: string): Promise<boolean>
-  publish(agentId: string, workflowId: string, published: boolean): Promise<WorkflowDefinition>
   start(agentId: string, request: RunFlowStartRequest): Promise<RunFlowStartReceipt>
   execution(agentId: string, executionId: string): Promise<WorkflowExecution | null>
   cancel(agentId: string, executionId: string): Promise<boolean>
@@ -33,6 +38,7 @@ export interface FlowRuntimeSnapshot {
 const OFFLINE: FlowRuntimeSnapshot = { connected: false }
 let snapshot: FlowRuntimeSnapshot = OFFLINE
 let activeClient: FlowRuntimeClient | undefined
+let activeGateway: RunFlowGatewayV2 | undefined
 const listeners = new Set<() => void>()
 
 function publish(next: FlowRuntimeSnapshot): void {
@@ -50,6 +56,21 @@ function unwrap<T>(result: { ok: true; value: T } | {
 
 export function getFlowRuntime(): FlowRuntimeClient | undefined {
   return activeClient
+}
+
+export function getRunFlowGateway(): RunFlowGatewayV2 | undefined {
+  return activeGateway
+}
+
+export function clientContextForRuntime(
+  client: Pick<FlowRuntimeClient, 'currentAgentId'>,
+): RunFlowClientContext | undefined {
+  const agentId = client.currentAgentId()
+  return agentId === undefined ? undefined : { agentId }
+}
+
+export function getRunFlowClientContext(): RunFlowClientContext | undefined {
+  return activeClient === undefined ? undefined : clientContextForRuntime(activeClient)
 }
 
 export function getFlowRuntimeSnapshot(): FlowRuntimeSnapshot {
@@ -76,9 +97,13 @@ export async function connectFlowRuntime(ctx: ClientContext): Promise<() => Prom
   // scope that explicitly injects it before accessing the namespace; the
   // parent cannot declare it because the mount happens in this apply phase.
   const remoteFiber = ctx.inject(['remote.runflow'], (remoteCtx) => {
+    // Both Host and browser packages augment Cordis' `sessions` name. This
+    // callback runs in the browser client, so narrow the merged declaration to
+    // the controller-owned reactive session facade.
+    const sessions = remoteCtx.sessions as unknown as ISessions
     const currentMainAgentId = (): string | undefined => {
-      const sessionId = remoteCtx.sessions.list.getSnapshot().current
-      if (sessionId === undefined || remoteCtx.sessions.subagentAddress(sessionId) !== undefined) return undefined
+      const sessionId = sessions.list.getSnapshot().current
+      if (sessionId === undefined || sessions.subagentAddress(sessionId) !== undefined) return undefined
       return sessionId
     }
     const client: FlowRuntimeClient = {
@@ -86,7 +111,6 @@ export async function connectFlowRuntime(ctx: ClientContext): Promise<() => Prom
       workspace: async agentId => unwrap(await remoteCtx.remote.runflow.workspace(agentId)),
       save: async (agentId, definition) => unwrap(await remoteCtx.remote.runflow.save(agentId, definition)),
       remove: async (agentId, workflowId) => unwrap(await remoteCtx.remote.runflow.deleteWorkflow(agentId, workflowId)),
-      publish: async (agentId, workflowId, published) => unwrap(await remoteCtx.remote.runflow.publish(agentId, workflowId, published)),
       start: async (agentId, request) => unwrap(await remoteCtx.remote.runflow.start(agentId, request)),
       execution: async (agentId, executionId) =>
         unwrap(await remoteCtx.remote.runflow.execution(agentId, executionId)),
@@ -96,9 +120,10 @@ export async function connectFlowRuntime(ctx: ClientContext): Promise<() => Prom
       saveSource: async (agentId, request) => unwrap(await remoteCtx.remote.runflow.saveSource(agentId, request)),
     }
     activeClient = client
+    activeGateway = createRunFlowGatewayV2Adapter(client)
 
     const refresh = (): void => {
-      const selected = remoteCtx.sessions.list.getSnapshot().current
+      const selected = sessions.list.getSnapshot().current
       const sessionId = currentMainAgentId()
       publish({
         connected: true,
@@ -110,12 +135,13 @@ export async function connectFlowRuntime(ctx: ClientContext): Promise<() => Prom
             : {}),
       })
     }
-    const stopSessions = remoteCtx.sessions.list.subscribe(refresh)
+    const stopSessions = sessions.list.subscribe(refresh)
     refresh()
     return () => {
       stopSessions()
       if (activeClient === client) {
         activeClient = undefined
+        activeGateway = undefined
         publish(OFFLINE)
       }
     }

@@ -4,10 +4,11 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LightCodeEditor, completionsFor } from '../src/client/LightCodeEditor.tsx'
-import { NodePalette } from '../src/client/Panels.tsx'
+import { NodePalette, PropertyInspector } from '../src/client/Panels.tsx'
 import { SourceWorkbench } from '../src/client/SourceWorkbench.tsx'
+import { WorkflowSidebar } from '../src/client/WorkflowSidebar.tsx'
 import { mergeNodeCatalog } from '../src/client/catalog.tsx'
-import { useFlowStore } from '../src/client/store.ts'
+import { makeNode, useFlowStore } from '../src/client/store.ts'
 
 let host: HTMLDivElement
 let root: Root
@@ -64,6 +65,24 @@ describe('RunFlow interactive UI components', () => {
     expect(useFlowStore.getState().nodes.at(-1)?.data.nodeType).toBe('fixture.ui-node')
   })
 
+  it('shows provider-defined custom groups in the persistent Nodes sidebar tab', async () => {
+    useFlowStore.setState({
+      view: 'editor',
+      nodeCatalog: mergeNodeCatalog([{
+        type: 'acme.caption-image', title: 'Caption image', description: 'Custom provider node', category: 'ai',
+        group: 'Acme Tools/Images', color: '#2563eb', icon: 'bot', inputs: [{ id: 'image', type: 'image' }], outputs: [{ id: 'caption', type: 'text' }],
+      }]),
+    })
+    await act(async () => root.render(<WorkflowSidebar />))
+    const nodesTab = [...host.querySelectorAll('button')].find(button => button.textContent?.includes('Nodes'))!
+    await act(async () => nodesTab.click())
+    expect(host.textContent).toContain('Node Library')
+    expect(host.textContent).toContain('Acme Tools')
+    expect(host.textContent).toContain('Images')
+    expect(host.textContent).toContain('Caption image')
+    expect(host.textContent).toContain('Node Lab')
+  })
+
   it('keeps trusted source editing locked outside creation mode and closes with Escape', async () => {
     useFlowStore.setState({
       sourceWorkbenchOpen: true,
@@ -74,5 +93,18 @@ describe('RunFlow interactive UI components', () => {
     expect(host.textContent).toContain('仅创造模式可编辑可信 Host 源码')
     await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
     expect(useFlowStore.getState().sourceWorkbenchOpen).toBe(false)
+  })
+
+  it('provides operational editors for the new v2 utility nodes', async () => {
+    const switchNode = makeNode('switch', 'builtin.switch', { x: 0, y: 0 }, {
+      rules: [{ path: 'priority', operator: 'equals', value: 'high' }],
+    })
+    useFlowStore.setState({ nodes: [switchNode], selectedNodeId: switchNode.id })
+
+    await act(async () => root.render(<PropertyInspector />))
+
+    expect(host.textContent).toContain('Rules JSON')
+    expect(host.querySelector('textarea')?.value).toContain('priority')
+    expect(host.textContent).not.toContain('Value')
   })
 })

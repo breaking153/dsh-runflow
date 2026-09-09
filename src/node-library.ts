@@ -1,16 +1,14 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
-  renameSync,
   unlinkSync,
   watch,
-  writeFileSync,
   type FSWatcher,
 } from 'node:fs'
-import { mkdir, rename, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, unlink } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type {
   JsonValue,
@@ -19,6 +17,7 @@ import type {
   WorkflowNodeDefinition,
   WorkflowNodeDescriptor,
 } from './contracts.ts'
+import { writeAtomicJson, writeAtomicJsonSync } from './backend/v2/atomic-json.ts'
 
 export type NodeLibrarySource = 'builtin' | 'plugin' | 'memory' | 'local'
 
@@ -97,6 +96,19 @@ function validateDraft(input: NodeDraftInput): void {
   if (!['trigger', 'action', 'logic', 'ai', 'data'].includes(descriptor.category)) {
     throw new Error('node descriptor.category is invalid')
   }
+  if (descriptor.group !== undefined) {
+    const segments = descriptor.group.split('/')
+    if (descriptor.group.length > 160
+      || segments.length > 8
+      || segments.some(segment => segment.trim().length === 0
+        || segment !== segment.trim()
+        || segment === '.'
+        || segment === '..'
+        || /[\u0000-\u001F\u007F]/.test(segment)
+        || segment.length > 48)) {
+      throw new Error('node descriptor.group must be a slash-delimited path with 1-8 non-empty segments')
+    }
+  }
   if (!/^#[0-9a-fA-F]{6}$/.test(descriptor.color)) {
     throw new Error('node descriptor.color must be a six-digit hex color')
   }
@@ -130,6 +142,7 @@ function descriptorOf(record: NodeRecord): WorkflowNodeDescriptor {
 
 export class FlowNodeLibrary {
   private readonly records = new Map<string, NodeRecord>()
+  private readonly persistingTypes = new Set<string>()
   readonly nodesDir: string
   readonly draftsDir: string
 
@@ -193,8 +206,8 @@ export class FlowNodeLibrary {
       savedAt,
       program: input.program,
     }
-    this.records.set(input.descriptor.type, record)
     this.persistDraft(record)
+    this.records.set(input.descriptor.type, record)
     return this.project(record, true)
   }
 
@@ -206,13 +219,17 @@ export class FlowNodeLibrary {
     return true
   }
 
-  markTested(type: string, execution: WorkflowExecution): NodeTestReceipt {
-    const record = this.requireMutable(type)
+  markTested(type: string, execution: WorkflowExecution, expectedRevision?: string): NodeTestReceipt {
+    const record = { ...this.requireMutable(type) }
     if (record.revision === undefined) throw new Error('node draft has no revision')
+    if (expectedRevision !== undefined && record.revision !== expectedRevision) {
+      throw new Error('node draft revision changed during testing; test the current revision again')
+    }
     const passed = execution.status === 'SUCCESS'
     if (passed) record.testedRevision = record.revision
     else delete record.testedRevision
     this.persistDraft(record)
+    this.records.set(type, record)
     return { type, revision: record.revision, execution: clone(execution), passed }
   }
 
@@ -223,36 +240,46 @@ export class FlowNodeLibrary {
     if (record.testedRevision !== record.revision) {
       throw new Error('node draft must pass an in-memory RunFlow execution test at its current revision before commit')
     }
-    await mkdir(this.nodesDir, { recursive: true })
-    const path = join(this.nodesDir, fileName(type))
-    const savedAt = new Date().toISOString()
-    const document: PersistedNodeDocument = {
-      formatVersion: 1,
-      state: 'committed',
-      descriptor: descriptorOf(record),
-      program: record.program,
-      revision: record.revision,
-      ...(record.testedRevision === undefined ? {} : { testedRevision: record.testedRevision }),
-      savedAt,
+    this.beginPersistence(type)
+    try {
+      await mkdir(this.nodesDir, { recursive: true })
+      const path = join(this.nodesDir, fileName(type))
+      const savedAt = new Date().toISOString()
+      const document: PersistedNodeDocument = {
+        formatVersion: 1,
+        state: 'committed',
+        descriptor: descriptorOf(record),
+        program: record.program,
+        revision: record.revision,
+        ...(record.testedRevision === undefined ? {} : { testedRevision: record.testedRevision }),
+        savedAt,
+      }
+      await writeAtomicJson(path, document)
+      const committed: NodeRecord = { ...record, source: 'local', path, savedAt }
+      // A newer edit may replace this record while the committed file is being written.
+      // Publish and remove the draft together only if it is still the tested snapshot.
+      if (this.records.get(type) === record) {
+        const draftPath = record.path
+        if (draftPath !== undefined && draftPath !== path && existsSync(draftPath)) unlinkSync(draftPath)
+        this.records.set(type, committed)
+      }
+      return this.project(committed, true)
+    } finally {
+      this.persistingTypes.delete(type)
     }
-    const temporary = path + '.' + randomUUID() + '.tmp'
-    await writeFile(temporary, JSON.stringify(document, null, 2) + '\n', { encoding: 'utf8', flag: 'wx' })
-    if (existsSync(path)) await unlink(path)
-    await rename(temporary, path)
-    const draftPath = record.path
-    if (draftPath !== undefined && draftPath !== path && existsSync(draftPath)) await unlink(draftPath)
-    record.source = 'local'
-    record.path = path
-    record.savedAt = savedAt
-    return this.project(record, true)
   }
 
   async removePersisted(type: string): Promise<boolean> {
     const record = this.records.get(type)
     if (record?.source !== 'local' || record.path === undefined) return false
-    await unlink(record.path)
-    this.records.delete(type)
-    return true
+    this.beginPersistence(type)
+    try {
+      await unlink(record.path)
+      if (this.records.get(type) === record) this.records.delete(type)
+      return true
+    } finally {
+      this.persistingTypes.delete(type)
+    }
   }
 
   /** Watch committed and draft JSON providers and hot-reload changes from disk. */
@@ -284,6 +311,11 @@ export class FlowNodeLibrary {
   private registerStable(definition: WorkflowNodeDefinition, source: 'builtin' | 'plugin'): void {
     if (this.records.has(definition.type)) throw new Error('flow: duplicate node provider ' + definition.type)
     this.records.set(definition.type, { descriptor: descriptorFromDefinition(definition), definition, source })
+  }
+
+  private beginPersistence(type: string): void {
+    if (this.persistingTypes.has(type)) throw new Error('node commit or removal is already in progress: ' + type)
+    this.persistingTypes.add(type)
   }
 
   private definition(input: NodeDraftInput): WorkflowNodeDefinition {
@@ -332,10 +364,7 @@ export class FlowNodeLibrary {
       ...(record.testedRevision === undefined ? {} : { testedRevision: record.testedRevision }),
       savedAt,
     }
-    const temporary = path + '.' + randomUUID() + '.tmp'
-    writeFileSync(temporary, JSON.stringify(document, null, 2) + '\n', 'utf8')
-    if (existsSync(path)) unlinkSync(path)
-    renameSync(temporary, path)
+    writeAtomicJsonSync(path, document)
     record.path = path
     record.savedAt = savedAt
   }
@@ -378,7 +407,19 @@ export class FlowNodeLibrary {
       }
     }
     for (const [type, record] of [...this.records]) {
-      if (record.source === 'local' || record.source === 'memory') this.records.delete(type)
+      if (record.source !== 'local' && record.source !== 'memory') continue
+      const loaded = disk.get(type)
+      // Reloads of the same durable snapshot must not invalidate an in-flight
+      // commit/removal. A new revision or changed metadata still replaces it.
+      if (loaded !== undefined
+        && loaded.source === record.source
+        && loaded.revision === record.revision
+        && loaded.testedRevision === record.testedRevision
+        && loaded.path === record.path
+        && loaded.savedAt === record.savedAt) {
+        disk.set(type, record)
+      }
+      this.records.delete(type)
     }
     for (const [type, record] of disk) {
       const stable = this.records.get(type)

@@ -1,59 +1,61 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
-  AlertTriangle, Check, ChevronDown, ChevronUp, LoaderCircle, TerminalSquare,
+  AlertTriangle, Check, ChevronDown, ChevronUp, CircleX, Clock3, FileClock,
+  LoaderCircle, Square, TerminalSquare,
 } from 'lucide-react'
+import type { WorkflowExecution } from '../contracts.ts'
 import { useFlowStore } from './store.ts'
+
+function elapsed(execution: WorkflowExecution): number {
+  return execution.startedAt === undefined ? 0 : Math.max(0,
+    new Date(execution.finishedAt ?? Date.now()).getTime() - new Date(execution.startedAt).getTime())
+}
+
+function ExecutionStatusIcon({ execution }: { execution: WorkflowExecution }) {
+  if (execution.status === 'RUNNING' || execution.status === 'PENDING') return <LoaderCircle size={12} className="flow-spin" />
+  if (execution.status === 'FAILED') return <AlertTriangle size={12} />
+  if (execution.status === 'CANCELLED') return <CircleX size={12} />
+  return <Check size={12} />
+}
 
 export function ExecutionDock() {
   const [open, setOpen] = useState(false)
-  const execution = useFlowStore(state => state.executions[0])
-  const running = useFlowStore(state => state.running)
+  const [tab, setTab] = useState<'queue' | 'history'>('queue')
+  const workflowId = useFlowStore(state => state.workflowId)
+  const executions = useFlowStore(state => state.executions)
   const runError = useFlowStore(state => state.runError)
   const openNodeDetails = useFlowStore(state => state.openNodeDetails)
+  const cancelRun = useFlowStore(state => state.cancelRun)
+  const relevant = useMemo(() => executions.filter(item => item.workflowId === workflowId), [executions, workflowId])
+  const queue = relevant.filter(item => item.status === 'PENDING' || item.status === 'RUNNING')
+  const history = relevant.filter(item => item.status !== 'PENDING' && item.status !== 'RUNNING')
+  const execution = queue[0] ?? history[0]
   if (execution === undefined) {
-    return runError === undefined ? null : (
-      <section className="execution-dock execution-error" role="alert">
-        <AlertTriangle size={14} /><span><strong>Host 执行未启动</strong>{runError}</span>
-      </section>
-    )
+    return runError === undefined ? null : <section className="execution-dock execution-error" role="alert"><AlertTriangle size={14} /><span><strong>Host execution did not start</strong>{runError}</span></section>
   }
-  const duration = execution.startedAt === undefined ? 0 : Math.max(0,
-    new Date(execution.finishedAt ?? Date.now()).getTime() - new Date(execution.startedAt).getTime())
-  return (
-    <section className="execution-dock" aria-label="最近执行" aria-live="polite">
-      <button type="button" className="execution-summary" onClick={() => setOpen(value => !value)} aria-expanded={open} aria-controls="runflow-execution-details">
-        <span className="execution-icon">{running ? <LoaderCircle size={14} className="flow-spin" /> : <TerminalSquare size={14} />}</span>
-        <span className="execution-copy">
-          <strong>{running
-            ? 'Host 正在执行'
-            : execution.status === 'FAILED'
-              ? '执行失败'
-              : execution.status === 'CANCELLED' ? '执行已停止' : '执行完成'}</strong>
-          <span>{execution.id.slice(0, 8)} · {execution.nodes.length} 个节点</span>
-        </span>
-        <span className="execution-duration">{(duration / 1000).toFixed(2)}s</span>
-        {open ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
-      </button>
-      {runError !== undefined && <div className="execution-inline-error" role="alert"><AlertTriangle size={12} />{runError}</div>}
-      {open && <div id="runflow-execution-details" className="execution-body">
-        {execution.nodes.map(record => (
-          <button
-            type="button"
-            className="execution-row"
-            key={record.nodeId}
-            onClick={() => openNodeDetails(record.nodeId, undefined, execution.id)}
-            disabled={record.status === 'WAITING'}
-            aria-label={'查看 ' + record.nodeId + ' 执行详情'}
-          >
-            {record.status === 'RUNNING'
-              ? <LoaderCircle size={12} className="flow-spin" />
-              : record.status === 'FAILED' ? <AlertTriangle size={12} /> : <Check size={12} />}
-            <span>{record.nodeId}</span>
-            <time>{record.status.toLowerCase()} · {record.durationMs ?? 0}ms</time>
+  const completed = execution.nodes.filter(node => ['SUCCESS', 'FAILED', 'SKIPPED', 'CANCELLED'].includes(node.status)).length
+  const progress = execution.nodes.length === 0 ? 0 : Math.round(completed / execution.nodes.length * 100)
+  const visible = tab === 'queue' ? queue : history
+  return <section className={'execution-dock queue-dock ' + (open ? 'is-open' : '')} aria-label="Execution queue and history" aria-live="polite">
+    <button type="button" className="execution-summary" onClick={() => setOpen(value => !value)} aria-expanded={open} aria-controls="runflow-execution-details">
+      <span className="execution-icon">{queue.length > 0 ? <LoaderCircle size={14} className="flow-spin" /> : <TerminalSquare size={14} />}</span>
+      <span className="execution-copy"><strong>{queue.length > 0 ? `Host queue · ${progress}%` : execution.status === 'FAILED' ? 'Last execution failed' : execution.status === 'CANCELLED' ? 'Last execution stopped' : 'Last execution complete'}</strong><span>{queue.length} active · {history.length} history</span></span>
+      <span className="execution-duration">{(elapsed(execution) / 1000).toFixed(2)}s</span>{open ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+    </button>
+    {queue.length > 0 && <div className="queue-progress" role="progressbar" aria-label="Workflow progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><span style={{ width: `${progress}%` }} /></div>}
+    {runError !== undefined && <div className="execution-inline-error" role="alert"><AlertTriangle size={12} />{runError}</div>}
+    {open && <div id="runflow-execution-details" className="execution-body queue-body">
+      <nav aria-label="Execution list"><button className={tab === 'queue' ? 'active' : ''} onClick={() => setTab('queue')}><Clock3 size={12} />Queue <span>{queue.length}</span></button><button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}><FileClock size={12} />History <span>{history.length}</span></button></nav>
+      <div className="queue-list">
+        {visible.map(item => <article className={'queue-item status-' + item.status.toLowerCase()} key={item.id}>
+          <button onClick={() => { const nodeId = item.nodes[0]?.nodeId; if (nodeId !== undefined) openNodeDetails(nodeId, undefined, item.id) }}>
+            <ExecutionStatusIcon execution={item} /><span><strong>{item.status}</strong><small>{item.id.slice(0, 10)} · {item.trigger}</small></span><time>{(elapsed(item) / 1000).toFixed(2)}s</time>
           </button>
-        ))}
-        {execution.outputDir !== undefined && <div className="execution-output-dir"><span>Output</span><code>{execution.outputDir}</code></div>}
-      </div>}
-    </section>
-  )
+          {(item.status === 'RUNNING' || item.status === 'PENDING') && <button className="queue-cancel" onClick={() => void cancelRun()} aria-label={`Cancel ${item.id}`}><Square size={10} fill="currentColor" />Stop</button>}
+        </article>)}
+        {visible.length === 0 && <div className="queue-empty">{tab === 'queue' ? 'No pending or running executions.' : 'No completed executions yet.'}</div>}
+      </div>
+      {execution.outputDir !== undefined && <div className="execution-output-dir"><span>Output</span><code>{execution.outputDir}</code></div>}
+    </div>}
+  </section>
 }
