@@ -116,7 +116,7 @@ The **Nodes** tab exposes **Node Lab** in its footer. In creation mode it reads 
 
 ## Install and run the first workflow
 
-RunFlow requires Node.js `^22.19.0` or `>=24.0.0` and DeepSeek Harness `0.1.2-alpha.2`, matching the current peer dependencies.
+RunFlow requires Node.js `^22.19.0` or `>=24.0.0` and DeepSeek Harness `0.1.5-rc.1`, matching the current peer dependencies. See the [compatibility record](docs/DSH_COMPATIBILITY.md) for verification and the local Web launcher.
 
 ### Local link installation
 

@@ -116,7 +116,7 @@ Host 会在执行前逐项校验 Provider capability。Provider 不支持的 `ou
 
 ## 安装与第一次执行
 
-要求 Node.js `^22.19.0` 或 `>=24.0.0`，并使用与当前插件 peer dependencies 匹配的 DeepSeek Harness `0.1.2-alpha.2`。
+要求 Node.js `^22.19.0` 或 `>=24.0.0`，并使用与当前插件 peer dependencies 匹配的 DeepSeek Harness `0.1.5-rc.1`。本轮兼容验证与本地 Web 启动说明见 [兼容性记录](docs/DSH_COMPATIBILITY.md)。
 
 ### 本地 Link 安装
 

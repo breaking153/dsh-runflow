@@ -16,6 +16,6 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src", "script", "nodes", "tests", "tsdown.config.ts", "vite.config.ts"],
+  "include": ["src", "script", "nodes", "tests", "tsdown.config.ts", "vite.config.ts", "vitest.config.ts"],
   "exclude": ["src/client", "tests/**/*.client.spec.tsx"]
 }
