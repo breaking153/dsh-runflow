@@ -1,13 +1,25 @@
+# Dependencies and build artifacts
 node_modules/
-.worktrees/
+.pnpm-store/
 lib/
 preview-dist/
 coverage/
+*.tsbuildinfo
+
+# Local tools and isolated workspaces
+.worktrees/
+.code-review-graph/
 .playwright-cli/
-*.log
-.DS_Store
-.ua/tmp/
-.ua/intermediate/
-.ua
+.ua/
+
+# Local runtime data
 output/runflow/
 data/runflow/
+
+# Logs and local environment settings
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+!.env.*.example
