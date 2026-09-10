@@ -1,11 +1,11 @@
 import type { JsonObject, JsonValue, NodeExecutionContext, WorkflowNodeDefinition } from '../src/contracts.ts'
+import { controlNodeDescriptors } from '../src/control-node-catalog.ts'
 
 const reserved = new Set(['__proto__', 'constructor', 'prototype'])
 const isObject = (value: unknown): value is JsonObject => typeof value === 'object' && value !== null && !Array.isArray(value)
-const input = { id: 'input', type: 'any' as const, multiple: true }
-const ports = (...ids: string[]) => ids.map(id => ({ id, label: id, type: 'any' as const }))
 
 function payload(context: NodeExecutionContext): JsonValue {
+  if (Object.hasOwn(context.inputs, 'data')) return context.inputs.data!
   const raw = Array.isArray(context.input) && context.input.length === 1 ? context.input[0]! : context.input
   return isObject(raw) && raw.$runflow === 'flow' && Object.hasOwn(raw, 'payload') ? raw.payload! : raw
 }
@@ -56,22 +56,20 @@ function integer(config: JsonObject, key: string, fallback: number, min: number,
   return value
 }
 
-const base = { category: 'logic' as const, group: 'Core/State Graph', color: '#a78bfa', icon: 'git-branch', inputs: [input], outputs: ports('output') }
-const comparisonSchema: JsonObject = { type: 'object', properties: { source: { type: 'string', enum: ['input', 'state'], default: 'input' }, path: { type: 'string', default: '' }, operator: { type: 'string', enum: ['equals', 'notEquals', 'contains', 'greaterThan', 'lessThan', 'exists', 'truthy'], default: 'equals' }, value: {} } }
-
 /** JSON-only control nodes for the native state-graph runtime. */
 export function controlNodeDefinitions(): WorkflowNodeDefinition[] {
+  const descriptors = controlNodeDescriptors()
+  const descriptor = (type: string) => descriptors.find(node => node.type === type)!
   return [
     {
-      ...base, type: 'control.branch', title: 'Branch', description: 'Activate exactly one true or false branch using input or shared state.', outputs: ports('true', 'false'), configSchema: comparisonSchema,
+      ...descriptor('control.branch'),
       async execute(context) {
         const route = matches(source(context), context.node.config) ? 'true' : 'false'
         return { $runflow: 'control', outputs: { [route]: payload(context) }, routes: [route] }
       },
     },
     {
-      ...base, type: 'control.switch', title: 'Route by Rules', icon: 'split', description: 'Select the first of four rules, or the default branch.', outputs: ports('case1', 'case2', 'case3', 'case4', 'default'),
-      configSchema: { type: 'object', properties: { source: { type: 'string', enum: ['input', 'state'], default: 'input' }, rules: { type: 'array', maxItems: 4, items: comparisonSchema } } },
+      ...descriptor('control.switch'),
       async execute(context) {
         const rules = context.node.config.rules ?? []
         if (!Array.isArray(rules) || rules.length > 4 || rules.some(rule => !isObject(rule))) throw new Error('Switch requires at most four object rules')
@@ -81,8 +79,7 @@ export function controlNodeDefinitions(): WorkflowNodeDefinition[] {
       },
     },
     {
-      ...base, type: 'control.parallel', title: 'Parallel Branches', icon: 'workflow', description: 'Activate two to four independent branches in the next step.', outputs: ports('branch1', 'branch2', 'branch3', 'branch4'),
-      configSchema: { type: 'object', properties: { branchCount: { type: 'integer', minimum: 1, maximum: 4, default: 2 } } },
+      ...descriptor('control.parallel'),
       async execute(context) {
         const count = integer(context.node.config, 'branchCount', 2, 1, 4)
         const routes = Array.from({ length: count }, (_, index) => 'branch' + (index + 1))
@@ -90,12 +87,11 @@ export function controlNodeDefinitions(): WorkflowNodeDefinition[] {
       },
     },
     {
-      ...base, type: 'control.join', title: 'Join All Branches', icon: 'combine', description: 'Wait for one new message from every incoming edge; use only for branches that all run.', activation: 'all',
+      ...descriptor('control.join'),
       async execute(context) { return { $runflow: 'control', outputs: { output: context.input } } },
     },
     {
-      ...base, type: 'control.loop', title: 'Bounded Loop', icon: 'repeat-2', description: 'Continue while a comparison passes, up to the configured iteration limit.', outputs: ports('continue', 'done'),
-      configSchema: { ...comparisonSchema, properties: { ...(comparisonSchema.properties as JsonObject), maxIterations: { type: 'integer', minimum: 0, maximum: 1000, default: 10 } } },
+      ...descriptor('control.loop'),
       async execute(context) {
         const max = integer(context.node.config, 'maxIterations', 10, 0, 1000)
         const configured = context.node.config.path !== undefined || context.node.config.operator !== undefined
@@ -105,13 +101,11 @@ export function controlNodeDefinitions(): WorkflowNodeDefinition[] {
       },
     },
     {
-      ...base, type: 'state.read', title: 'Read State', category: 'data', color: '#38bdf8', icon: 'database', description: 'Read a shared state field after the previous step has committed.',
-      configSchema: { type: 'object', properties: { path: { type: 'string', default: '' } } },
+      ...descriptor('state.read'),
       async execute(context) { return { $runflow: 'control', outputs: { output: readStatePath(context.state ?? {}, typeof context.node.config.path === 'string' ? context.node.config.path : '') ?? null } } },
     },
     {
-      ...base, type: 'state.update', title: 'Update State', category: 'data', color: '#38bdf8', icon: 'list-plus', description: 'Update one shared state key using its workflow reducer.',
-      configSchema: { type: 'object', properties: { key: { type: 'string', default: 'result' }, source: { type: 'string', enum: ['input', 'value', 'state'], default: 'input' }, path: { type: 'string', default: '' }, value: {} } },
+      ...descriptor('state.update'),
       async execute(context) {
         const key = context.node.config.key ?? 'result'
         if (typeof key !== 'string' || key.length === 0 || reserved.has(key)) throw new Error('State update requires a non-reserved key')
@@ -120,12 +114,11 @@ export function controlNodeDefinitions(): WorkflowNodeDefinition[] {
       },
     },
     {
-      ...base, type: 'control.end', title: 'End Branch', icon: 'circle-stop', description: 'Finish this branch with its current value; other active branches can finish.',
+      ...descriptor('control.end'),
       async execute(context) { return { $runflow: 'control', outputs: { output: payload(context) }, routes: [] } },
     },
     {
-      ...base, type: 'control.interrupt', title: 'Pause for Input', icon: 'pause', description: 'Persist a checkpoint and wait for a Host-authorized response before continuing.',
-      configSchema: { type: 'object', properties: { prompt: { default: 'Review before continuing' }, stateKey: { type: 'string', default: 'approval' } } },
+      ...descriptor('control.interrupt'),
       async execute(context) {
         if (context.resume === undefined) return { $runflow: 'control', interrupt: context.node.config.prompt ?? 'Review before continuing' }
         const key = context.node.config.stateKey ?? 'approval'

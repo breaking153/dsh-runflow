@@ -13,6 +13,6 @@
     { "from": "loop", "to": "increment", "sourcePort": "continue", "targetPort": "input" },
     { "from": "increment", "to": "loop", "sourcePort": "output", "targetPort": "input" },
     { "from": "loop", "to": "read", "sourcePort": "done", "targetPort": "input" },
-    { "from": "read", "to": "end", "sourcePort": "output", "targetPort": "input" }
+    { "from": "read", "to": "end", "sourcePort": "output", "targetPort": "data" }
   ]
 }

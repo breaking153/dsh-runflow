@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { WorkflowDefinition } from '../src/contracts.ts'
-import { executeWorkflow } from '../src/engine.ts'
+import type { JsonValue, WorkflowDefinition, WorkflowNodeDefinition } from '../src/contracts.ts'
+import { executeWorkflow, validateWorkflow } from '../src/engine.ts'
 import { controlNodeDefinitions } from '../nodes/control-nodes.ts'
 
 const controls = controlNodeDefinitions()
@@ -10,6 +10,60 @@ const graph = (nodes: WorkflowDefinition['nodes'], edges: WorkflowDefinition['ed
 })
 
 describe('preset control nodes', () => {
+  it.each(([null, false, [7], { $runflow: 'flow', payload: 'literal data' }] as JsonValue[]).map(value => ({ value })))('preserves explicit terminal data $value', async ({ value }) => {
+    const definition = graph([
+      { id: 'read', type: 'state.read', config: { path: 'value' } },
+      { id: 'end', type: 'control.end', config: {} },
+    ], [{ from: 'read', to: 'end', targetPort: 'data' }], { value })
+    const result = await executeWorkflow(definition, {}, runtime)
+    expect(result.status).toBe('SUCCESS')
+    expect(result.output).toEqual(value)
+  })
+
+  it('uses explicit data ahead of a simultaneous flow payload', async () => {
+    const values: WorkflowNodeDefinition = {
+      type: 'test.values', title: 'Values', category: 'data', description: '', color: '', icon: '',
+      inputs: [], outputs: [{ id: 'flow', type: 'flow' }, { id: 'data', type: 'boolean' }],
+      async execute() { return { $runflow: 'port-outputs', outputs: { flow: 'ignored flow payload', data: false } } },
+    }
+    const result = await executeWorkflow(graph([
+      { id: 'values', type: values.type, config: {} }, { id: 'end', type: 'control.end', config: {} },
+    ], [
+      { from: 'values', sourcePort: 'flow', to: 'end', targetPort: 'input' },
+      { from: 'values', sourcePort: 'data', to: 'end', targetPort: 'data' },
+    ]), {}, { ...runtime, resolveNode: type => type === values.type ? values : runtime.resolveNode(type) })
+    expect(result.status).toBe('SUCCESS')
+    expect(result.output).toBe(false)
+  })
+
+  it('accepts a JSON result at an explicit data entry before updating state and branching', async () => {
+    const result = await executeWorkflow(graph([
+      { id: 'read', type: 'state.read', config: { path: 'request' } },
+      { id: 'update', type: 'state.update', config: { key: 'received', source: 'input' } },
+      { id: 'branch', type: 'control.branch', config: { path: 'approved', value: true } },
+      { id: 'end', type: 'control.end', config: {} },
+    ], [
+      { from: 'read', to: 'update', targetPort: 'data' },
+      { from: 'update', to: 'branch' },
+      { from: 'branch', sourcePort: 'true', to: 'end' },
+    ], { request: { approved: true } }), {}, runtime)
+    expect(result.status).toBe('SUCCESS')
+    expect(result.state?.received).toEqual({ approved: true })
+    expect(result.output).toEqual({ approved: true })
+  })
+
+  it('reports the obsolete data-to-flow connection without rewriting the workflow', () => {
+    const definition = graph([
+      { id: 'read', type: 'state.read', config: {} }, { id: 'end', type: 'control.end', config: {} },
+    ], [{ from: 'read', to: 'end', sourcePort: 'output', targetPort: 'input' }])
+    const original = structuredClone(definition)
+    expect(validateWorkflow(definition, runtime.resolveNode)).toContainEqual({
+      code: 'PORT_TYPE_MISMATCH', nodeId: 'end',
+      message: 'json output read.output cannot connect to flow input end.input; compatible input: end.data',
+    })
+    expect(definition).toEqual(original)
+  })
+
   it('uses state read/update and selects one conditional branch', async () => {
     const result = await executeWorkflow(graph([
       { id: 'set', type: 'state.update', config: { key: 'score', source: 'value', value: 8 } },

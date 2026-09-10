@@ -52,14 +52,16 @@ Basic flow:
 
 ![Nodes tab with the grouped node library](./output/playwright/comfy-sidebar-nodes.png)
 
-The canvas follows familiar automation-editor interactions while retaining the DSH blue visual language:
+The canvas uses a graphite workbench inspired by UE Blueprint, with DSH blue selection and primary actions, while retaining familiar workflow-editor interactions:
 
 - Left-drag on empty space to marquee-select multiple nodes.
 - Hold the right mouse button and drag to pan; use the wheel or controls to zoom and fit the view.
 - Use the left **Nodes** tab to search or collapse groups, click to insert, or drag a node to an exact canvas position.
 - Right-click empty space, or select **Add node**, to open the Node Library.
 - Select a node to edit it in the Inspector; duplicate and delete actions live in the Inspector header.
+- Node drag, wire drag, and marquee gestures keep canvas and Inspector geometry stable; completed group resizing persists and supports one-step undo.
 - Drag an input or output port into empty space to list only directionally and type-compatible nodes.
+- Pointed pins identify `flow`; circular pins identify data. Invalid targets immediately show a red wire and an explanation, and release creates no invalid edge.
 - Hover a port for roughly 500ms to see a bounded preview; click the port or expand action for complete data.
 
 ![Visible DSH-blue selection marquee](./output/playwright/comfy-selection-marquee.png)
@@ -67,6 +69,8 @@ The canvas follows familiar automation-editor interactions while retaining the D
 ![Resizable parameter inspector and typed ports](./output/playwright/runflow-editor-desktop.png)
 
 Custom providers can declare their own hierarchy with an optional slash-delimited `group`, such as `Acme Tools/Images`. Omitting it keeps the legacy `category` fallback. Node Lab is reserved for source authoring rather than node discovery.
+
+The workbench retains one general Host status indicator and one set of zoom controls. The historical screenshots above show earlier UI versions; see the [Blueprint UI report (Chinese)](./docs/BLUEPRINT_UI_REPORT.md) for this visual direction and its validation evidence.
 
 ### 4. Configure a DSH Agent node
 
@@ -144,7 +148,7 @@ Restart the Web profile. **RunFlow** will appear in the DSH sidebar. The bundle 
         authoringPresetId: cordis
 ```
 
-For a first real run, create a workflow, connect `Manual Trigger → JavaScript → Storage`, save it, select **Execute workflow**, and open the resulting node Details from **Executions**.
+For a first run, import `bounded-loop.workflow.json` using the [state-graph guide](./docs/STATE_GRAPH_GUIDE.md#导入三个本地示例), inspect its loop and ports, and select **Execute workflow**. The expected local count is `3`, without invoking a real Agent. Other nodes must follow their declared port types; a Trigger's `flow` output cannot connect directly to a JSON data input.
 
 ## DeepSeek Harness architecture
 
@@ -257,9 +261,12 @@ Terminal results include `value`, `logs`, structured `error`, queue/execution ti
 ## Typed ports and multiple outputs
 
 - Supported types: `any/flow/json/text/number/boolean/file/files/image/audio/table/error`. Trigger `flow` signals carry business input; state control nodes can read their payload.
-- Edges route through `sourcePort` / `targetPort`; validation checks port existence, type compatibility, and connection cardinality before execution.
-- Legacy nodes without port declarations continue to use compatible `any input/output` ports.
+- `flow` connects only to `flow`. Known data types connect to the same type or an explicit `any` data input; an `any` output connects only to `any`, with no implicit conversion to concrete types. Frontend and Host share this policy.
+- Edges route through `sourcePort` / `targetPort`. DAGs reject occupied single inputs and cycles; state graphs retain message-based multiple incoming edges, while multiple messages reaching a single input in one step can still fail at runtime.
+- Legacy nodes without port declarations remain described as `any input/output` and follow the same rules. Control nodes preserve the old `input` ID for `flow` and offer an optional `data` input where supported; for example, connect `state.read.output` to `control.end.data`.
 - Every named output has its own preview and Details entry, which fits naturally multi-result HTTP, condition, Agent, and collection nodes.
+
+Previously accepted connections that relied on loose typing are not silently rewritten. Reconnect to the appropriate port or use a node with an explicit conversion and output type; see the [compatibility guide](./docs/STATE_GRAPH_GUIDE.md#端口形状类型与旧图兼容).
 
 RunFlow intentionally uses a lightweight “static port descriptor + runtime JSON value” model. It does not yet adopt ComfyUI-style dynamic ports, implicit conversion, widget-as-input, lazy evaluation, or binary object storage. This keeps protocol, migration, and debugging cost controlled while leaving room for evidence-driven extensions.
 

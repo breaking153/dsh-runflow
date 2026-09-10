@@ -19,6 +19,6 @@
     { "from": "first", "to": "join", "sourcePort": "output", "targetPort": "input" },
     { "from": "second", "to": "join", "sourcePort": "output", "targetPort": "input" },
     { "from": "join", "to": "read", "sourcePort": "output", "targetPort": "input" },
-    { "from": "read", "to": "end", "sourcePort": "output", "targetPort": "input" }
+    { "from": "read", "to": "end", "sourcePort": "output", "targetPort": "data" }
   ]
 }

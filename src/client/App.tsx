@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
-  Background, BackgroundVariant, ConnectionMode, Controls, MiniMap, ReactFlow, ReactFlowProvider,
-  SelectionMode, useReactFlow, type Connection, type IsValidConnection, type NodeTypes, type OnConnectEnd,
+  Background, BackgroundVariant, ConnectionMode, MiniMap, ReactFlow, ReactFlowProvider,
+  SelectionMode, useReactFlow, type Connection, type ConnectionLineComponentProps, type IsValidConnection, type NodeTypes, type OnConnectEnd,
 } from '@xyflow/react'
 import {
   Activity, ArrowLeft, ChevronDown, CircleAlert, Clock3, Copy, Download,
-  Eye, EyeOff, FileClock, Filter, Focus, History, LayoutDashboard, LayoutTemplate, Map, MoreHorizontal,
-  Keyboard, Play, Plus, Redo2, Search, SlidersHorizontal, Square, Star, Trash2, Undo2, Workflow, X, Zap,
+  Eye, EyeOff, FileClock, Filter, Focus, History, LayoutDashboard, LayoutTemplate, Map as MapIcon, MoreHorizontal,
+  Keyboard, Play, Plus, Redo2, Search, SlidersHorizontal, Square, Star, Trash2, Undo2, Workflow, X,
 } from 'lucide-react'
 import type { NodeCategory, WorkflowExecution, WorkflowPortType } from '../contracts.ts'
 import { CATEGORY_LABELS, NodeIcon } from './catalog.tsx'
@@ -18,6 +18,9 @@ import { FLOW_STYLES } from './styles.ts'
 import { FLOW_REDESIGN_STYLES } from './redesign-styles.ts'
 import { COMFY_INTERACTION_STYLES } from './comfy-interactions-styles.ts'
 import { RUNFLOW_RESPONSIVE_STYLES } from './responsive-styles.ts'
+import { BLUEPRINT_STYLES } from './blueprint-styles.ts'
+import { PORT_COLORS } from './port-presentation.ts'
+import { CanvasConnectionLine } from './CanvasConnectionLine.tsx'
 import { RUNFLOW_V2_STYLES } from './runflow-v2-styles.ts'
 import { RUNFLOW_SIDEBAR_STYLES } from './sidebar-styles.ts'
 import { CODE_EDITOR_STYLES } from './code-editor-styles.ts'
@@ -31,7 +34,7 @@ import { commandForKeyboardEvent, type EditorCommandId } from './editor-commands
 import { favoriteNodeTypes, rankNodeDescriptors, recentNodeTypes, rememberNodeType, toggleFavoriteNodeType, type NodeSearchScope } from './node-search.ts'
 import { TemplateBrowser } from './TemplateBrowser.tsx'
 import { KeybindingSettings } from './KeybindingSettings.tsx'
-import { compatiblePortTypes, normalizeNodeConnection } from './connection-planning.ts'
+import { compatiblePortTypes, validateNodeConnection, validateDraggedConnection, connectionFeedbackText, type ConnectionValidation } from './connection-planning.ts'
 import { nodeGroupLabel } from './node-groups.ts'
 import { useResizablePanel } from './use-resizable-panel.ts'
 import { relativeTime, useRunFlowLocale } from './locale.ts'
@@ -273,7 +276,7 @@ export function EditorHeader({ onTemplates, onKeybindings }: { onTemplates(): vo
 }
 
 function CanvasEditor() {
-  const { t } = useRunFlowLocale()
+  const { t, language } = useRunFlowLocale()
   const mode = useFlowStore(state => state.workflowExecution?.mode ?? 'dag')
   const nodes = useFlowStore(state => state.nodes)
   const edges = useFlowStore(state => state.edges)
@@ -314,6 +317,14 @@ function CanvasEditor() {
   const [menu, setMenu] = useState<CanvasMenuState>()
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [inspectorOpen, setInspectorOpen] = useState(true)
+  const [inspectorFrozen, setInspectorFrozen] = useState<boolean>()
+  const gesture = useRef<'node' | 'marquee' | 'connection'>()
+  const [connectionFeedback, setConnectionFeedback] = useState<ConnectionValidation>()
+  const selectionChange = useCallback(({ nodes: selected }: { nodes: FlowNode[] }): void => {
+    if (gesture.current !== undefined) return
+    selectNode(selected.length === 1 ? selected[0]?.id : undefined)
+  }, [selectNode])
+  const ConnectionLine = useMemo(() => (props: ConnectionLineComponentProps<FlowNode>) => <CanvasConnectionLine {...props} onFeedback={setConnectionFeedback} />, [])
   const selectedNodeId = useFlowStore(state => state.selectedNodeId)
   const review = useFlowStore(state => state.review)
   const inspectorPanel = useResizablePanel({
@@ -329,19 +340,37 @@ function CanvasEditor() {
   const selectedCount = nodes.filter(node => node.selected).length + edges.filter(edge => edge.selected).length
   const selectedWorkflowNodeCount = nodes.filter(node => node.selected && node.type === 'workflow').length
   const selectedNode = nodes.find(node => node.id === selectedNodeId)
-  const showInspector = inspectorOpen && (selectedNode !== undefined || review !== undefined) && selectedCount <= 1
-  const renderedEdges = useMemo(() => linksVisible ? edges : edges.map(edge => ({ ...edge, hidden: true })), [edges, linksVisible])
-  const normalizedConnection = (connection: Parameters<IsValidConnection>[0]): Connection | undefined => normalizeNodeConnection(nodes, connection, { mode, edges })
-  const validConnection: IsValidConnection = connection => normalizedConnection(connection) !== undefined
+  const showInspector = inspectorFrozen ?? (inspectorOpen && (selectedNode !== undefined || review !== undefined) && selectedCount <= 1)
+  const portSignature = JSON.stringify(nodes.map(node => [node.id, node.data.outputs.map(port => [port.id, port.type])]))
+  const edgeColors = useMemo(() => new Map(nodes.map(node => [node.id, node.data.outputs])), [portSignature])
+  const renderedEdges = useMemo(() => edges.map(edge => {
+    const ports = edgeColors.get(edge.source)
+    const source = ports?.find(port => port.id === edge.sourceHandle) ?? ports?.[0]
+    return { ...edge, hidden: !linksVisible, type: 'default', style: { ...edge.style, stroke: PORT_COLORS[source?.type ?? 'any'], strokeWidth: edge.selected ? 2.75 : 2 } }
+  }), [edges, linksVisible, edgeColors])
+  const validateConnection = (connection: Parameters<IsValidConnection>[0]): ConnectionValidation => validateNodeConnection(nodes, connection, { mode, edges })
+  const validConnection: IsValidConnection = connection => validateConnection(connection).ok
   const connectNodes = (connection: Connection): void => {
-    const normalized = normalizedConnection(connection)
-    if (normalized !== undefined) onConnect(normalized)
+    const result = validateConnection(connection)
+    if (result.ok) { onConnect(result.connection); setConnectionFeedback(undefined) }
+    else setConnectionFeedback(result)
   }
   const point = (event: MouseEvent | TouchEvent) => 'clientX' in event
     ? { x: event.clientX, y: event.clientY }
     : { x: event.changedTouches[0]?.clientX ?? 0, y: event.changedTouches[0]?.clientY ?? 0 }
   const connectionEnd: OnConnectEnd = (event, state) => {
-    if (!state.fromNode || state.toNode !== null || state.isValid === true) return
+    gesture.current = undefined; setInspectorFrozen(undefined)
+    if (!state.fromNode) return
+    if (state.isValid === true) { setConnectionFeedback(undefined); return }
+    if (state.toNode !== null) {
+      setConnectionFeedback(state.toHandle === null ? { ok: false, reason: 'missing-port' } : validateDraggedConnection(nodes, { nodeId: state.fromNode.id, handleId: state.fromHandle.id ?? null, type: state.fromHandle.type }, { nodeId: state.toNode.id, handleId: state.toHandle.id ?? null, type: state.toHandle.type }, { mode, edges }))
+      return
+    }
+    const eventTarget = event.target
+    if (!(eventTarget instanceof Element) || !eventTarget.matches('.react-flow__pane, .react-flow__background')) {
+      setConnectionFeedback({ ok: false, reason: 'missing-port' }); return
+    }
+    setConnectionFeedback(undefined)
     const p = point(event)
     const from = nodes.find(node => node.id === state.fromNode.id)
     const direction = state.fromHandle.type
@@ -410,7 +439,7 @@ function CanvasEditor() {
     }}>
       <div className="canvas-toolbar">
         {activeSubflowId !== undefined && <button className="subflow-breadcrumb" onClick={exitSubflow}><ArrowLeft size={13} /><span>{t('root')}</span><em>/</em><strong>{subflows.find(item => item.id === activeSubflowId)?.label ?? activeSubflowId}</strong></button>}
-        <button className="add-node-button" onClick={event => {
+        <button className="add-node-button" aria-label={t('addNode')} title={t('addNode')} onClick={event => {
           const rect = event.currentTarget.getBoundingClientRect()
           const flow = screenToFlowPosition({ x: rect.left, y: rect.bottom + 8 })
           setCreator({ clientX: rect.left, clientY: rect.bottom + 8, flowX: flow.x, flowY: flow.y })
@@ -420,7 +449,7 @@ function CanvasEditor() {
           <button onClick={undoGraph} disabled={graphHistory.past.length === 0} aria-label={t('undo')} title={`${t('undo')} (Ctrl+Z)`}><Undo2 size={14} /></button>
           <button onClick={redoGraph} disabled={graphHistory.future.length === 0} aria-label={t('redo')} title={`${t('redo')} (Ctrl+Shift+Z)`}><Redo2 size={14} /></button>
           <button onClick={() => setLinksVisible(!linksVisible)} aria-pressed={!linksVisible} aria-label={linksVisible ? t('hideLinks') : t('showLinks')} title={linksVisible ? t('hideLinks') : t('showLinks')}>{linksVisible ? <Eye size={14} /> : <EyeOff size={14} />}</button>
-          <button onClick={() => setMinimapVisible(!minimapVisible)} aria-pressed={minimapVisible} aria-label={t('toggleMinimap')} title={t('toggleMinimap')}><Map size={14} /></button>
+          <button onClick={() => setMinimapVisible(!minimapVisible)} aria-pressed={minimapVisible} aria-label={t('toggleMinimap')} title={t('toggleMinimap')}><MapIcon size={14} /></button>
         </div>
         <div className="canvas-tools"><button onClick={() => zoomOut()} aria-label={t('zoomOut')}>-</button><button onClick={() => fitView({ duration: typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 220, padding: .22 })} aria-label={t('fitView')}><Focus size={15} /></button><button onClick={() => zoomIn()} aria-label={t('zoomIn')}>+</button></div>
       </div>
@@ -432,7 +461,9 @@ function CanvasEditor() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={connectNodes}
+        onConnectStart={() => { gesture.current = 'connection'; setInspectorFrozen(showInspector); setConnectionFeedback(undefined) }}
         onConnectEnd={connectionEnd}
+        connectionLineComponent={ConnectionLine}
         onDragOver={event => {
           if (!event.dataTransfer.types.includes(RUNFLOW_NODE_DRAG_TYPE)) return
           event.preventDefault()
@@ -449,16 +480,21 @@ function CanvasEditor() {
           addNode(descriptor, position)
           setInspectorOpen(true)
         }}
-        onNodeDragStart={beginGraphGesture}
+        selectNodesOnDrag={false}
+        onNodeDragStart={() => { gesture.current = 'node'; setInspectorFrozen(showInspector); beginGraphGesture() }}
         onNodeDrag={(_event, node) => { if (node.type === 'runflow-group') moveGroupChildren(node.id, node.position) }}
-        onNodeDragStop={endGraphGesture}
-        onSelectionChange={({ nodes: selected }) => {
-          if (selected.length === 1) selectNode(selected[0]?.id)
-          else if (selected.length > 1) selectNode()
+        onNodeDragStop={() => { endGraphGesture(); gesture.current = undefined; setInspectorFrozen(undefined) }}
+        onSelectionStart={() => { gesture.current = 'marquee'; setInspectorFrozen(showInspector) }}
+        onSelectionEnd={() => {
+          gesture.current = undefined
+          const selected = useFlowStore.getState().nodes.filter(node => node.selected)
+          selectNode(selected.length === 1 ? selected[0]?.id : undefined)
+          setInspectorFrozen(undefined)
         }}
+        onSelectionChange={selectionChange}
         onNodeDoubleClick={(_event, node) => { if (node.type === 'runflow-subflow') enterSubflow(node.id); else if (node.data.executionRecord !== undefined) openNodeDetails(node.id) }}
-        onNodeClick={() => setInspectorOpen(true)}
-        onPaneClick={() => { selectNode(); setCreator(undefined) }}
+        onNodeClick={(_event, node) => { selectNode(node.id); setInspectorOpen(true) }}
+        onPaneClick={() => { selectNode(); setCreator(undefined); setConnectionFeedback(undefined) }}
         onPaneContextMenu={event => {
           event.preventDefault()
           if (suppressContextMenu.current) return
@@ -492,14 +528,14 @@ function CanvasEditor() {
         snapToGrid
         snapGrid={[16, 16]}
         connectionRadius={36}
-        connectionMode={ConnectionMode.Loose}
+        connectionMode={ConnectionMode.Strict}
         connectionLineStyle={{ stroke: 'var(--dsw-alias-state-business-primary, #4a5fa8)', strokeWidth: 2 }}
-        defaultEdgeOptions={{ type: 'smoothstep', style: { stroke: 'var(--dsw-alias-border-strong, #7182aa)', strokeWidth: 1.7 } }}
+        defaultEdgeOptions={{ type: 'default', style: { stroke: 'var(--dsw-alias-border-strong, #7182aa)', strokeWidth: 1.7 } }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={18} size={1.1} color="#d7d9de" />
-        {minimapVisible && <MiniMap pannable zoomable nodeColor={node => String(node.data.color ?? '#8b8f99')} maskColor="rgba(245,246,248,.72)" />}
-        <Controls showInteractive={false} />
+        <Background variant={BackgroundVariant.Dots} gap={18} size={1.1} color="var(--bp-grid, #343a45)" />
+        {minimapVisible && <MiniMap pannable zoomable nodeColor={node => String(node.data.color ?? '#8b8f99')} maskColor="var(--bp-minimap-mask, rgba(24,27,33,.8))" />}
       </ReactFlow>
+      {connectionFeedback !== undefined && <div className={'connection-feedback ' + (connectionFeedback.ok ? 'is-valid' : 'is-invalid')} role={connectionFeedback.ok ? 'status' : 'alert'}>{connectionFeedbackText(connectionFeedback, language)}</div>}
       <SelectionToolbar count={selectedCount} workflowNodeCount={selectedWorkflowNodeCount} onCommand={executeCommand} onClose={() => {
         onNodesChange(nodes.filter(node => node.selected).map(node => ({ id: node.id, type: 'select' as const, selected: false })))
         onEdgesChange(edges.filter(edge => edge.selected).map(edge => ({ id: edge.id, type: 'select' as const, selected: false })))
@@ -523,13 +559,11 @@ function Editor() {
 }
 
 function Shell({ onClose }: { onClose?: (() => void) | undefined }) {
-  const { t } = useRunFlowLocale()
   const view = useFlowStore(state => state.view)
   const runtime = useFlowRuntime()
   const refresh = useFlowStore(state => state.refreshWorkspace)
   useEffect(() => { if (runtime.sessionId !== undefined) void refresh() }, [refresh, runtime.sessionId])
-  return <div className="dsh-runflow-root"><style>{FLOW_STYLES + FLOW_REDESIGN_STYLES + RUNFLOW_SIDEBAR_STYLES + CODE_EDITOR_STYLES + COMFY_INTERACTION_STYLES + RUNFLOW_RESPONSIVE_STYLES + RUNFLOW_V2_STYLES}</style><div className="flow-app"><WorkflowSidebar onClose={onClose} /><div className="runflow-main">
-    <div className="host-strip"><span className={runtime.sessionId === undefined ? 'offline' : ''}><Zap size={13} />{runtime.sessionId === undefined ? runtime.reason ?? t('hostDisconnected') : t('hostConnected')}</span></div>
+  return <div className="dsh-runflow-root"><style>{FLOW_STYLES + FLOW_REDESIGN_STYLES + RUNFLOW_SIDEBAR_STYLES + CODE_EDITOR_STYLES + COMFY_INTERACTION_STYLES + RUNFLOW_RESPONSIVE_STYLES + RUNFLOW_V2_STYLES + BLUEPRINT_STYLES}</style><div className="flow-app"><WorkflowSidebar onClose={onClose} /><div className="runflow-main">
     {view === 'workflows' && <WorkflowsPage />}
     {view === 'executions' && <ExecutionsPage />}
     {view === 'editor' && <Editor />}

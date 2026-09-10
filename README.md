@@ -52,14 +52,16 @@ Workflow 首页用于创建、搜索、筛选、复制和删除流程。左侧�
 
 ![左侧 Nodes 页签与分组节点库](./output/playwright/comfy-sidebar-nodes.png)
 
-画布遵循常见自动化编辑器的操作习惯，但使用 DSH 蓝色视觉系统：
+画布采用受 UE Blueprint 启发的石墨色工作台，以 DSH 蓝色表示选中与主要操作，保留现有工作流编辑习惯：
 
 - 鼠标左键拖动空白区域：框选多个节点。
 - 按住鼠标右键拖动：平移画布；滚轮或控制栏：缩放与适配视图。
 - 左侧 **Nodes** 页签：搜索或折叠节点分组，点击可插入，拖到画布可精确放置。
 - 右键点击空白区域，或点击 **Add node**：打开 Node Library。
 - 点击节点：在右侧 Inspector 编辑配置；复制或删除使用 Inspector 顶部按钮。
+- 拖动节点、拖线与框选期间保持画布和 Inspector 尺寸稳定；分组调整尺寸后保存，并可一步撤销。
 - 从 output/input 引脚拖到空白区域后松开：只显示类型兼容、方向正确的候选节点。
+- 尖角端口表示 `flow`，圆形端口表示数据；不兼容目标即时显示红色拖线和原因，松开不会创建错误连线。
 - 在引脚上停留约 500ms：显示有限长度预览；点击引脚或展开按钮查看完整数据。
 
 ![DSH 蓝色可见框选反馈](./output/playwright/comfy-selection-marquee.png)
@@ -67,6 +69,8 @@ Workflow 首页用于创建、搜索、筛选、复制和删除流程。左侧�
 ![可拉伸的参数属性栏与 typed ports](./output/playwright/runflow-editor-desktop.png)
 
 自定义节点可用可选的斜杠路径 `group` 声明自己的层级，例如 `Acme Tools/Images`。不声明时继续使用内置 `category` 的兼容分组；Node Lab 只负责源码开发，不再承担节点发现。
+
+工作台保留一个通用 Host 状态和一组缩放控件。上面的历史截图记录先前界面；本轮视觉方向和验证结果见[蓝图 UI 报告](./docs/BLUEPRINT_UI_REPORT.md)。
 
 ### 4. 配置 DSH Agent 节点
 
@@ -144,7 +148,7 @@ pnpm dsh plugin --profile web add "link:../dsh-flow"
         authoringPresetId: cordis
 ```
 
-第一次执行建议：创建一个 Workflow，连接 `Manual Trigger → JavaScript → Storage`，保存后点击 **Execute workflow**，最后从 **Executions** 打开对应节点 Details。
+第一次执行建议：按[状态图指南](./docs/STATE_GRAPH_GUIDE.md#导入三个本地示例)导入 `bounded-loop.workflow.json`，检查循环和端口后点击 **Execute workflow**，预期本地计数输出为 `3`。该示例不调用真实 Agent；其他节点应按声明的端口类型连接，不能把 Trigger 的 `flow` 直接接到 JSON 数据输入。
 
 ## 与 DeepSeek Harness 的架构关系
 
@@ -257,9 +261,12 @@ queued → running → success | error | cancelled
 ## 类型化端口与多输出
 
 - 支持 `any/flow/json/text/number/boolean/file/files/image/audio/table/error`；触发器的 `flow` 信号携带业务输入，状态控制节点可读取其中的 payload。
-- Edge 通过 `sourcePort` / `targetPort` 路由；执行前校验端口存在性、类型兼容和连接基数。
-- 未声明端口的旧节点按兼容的 `any input/output` 读取。
+- `flow` 只接 `flow`；已知数据类型接同类型或明确声明的 `any` 数据输入；`any` 输出只接 `any`，不隐式转换为具体类型。前端和 Host 共用这一规则。
+- Edge 通过 `sourcePort` / `targetPort` 路由。DAG 禁止占用单输入和循环；状态图保留按消息激活的多入边语义，同一步单输入收到多条消息仍可能报运行错误。
+- 未声明端口的旧节点继续按 `any input/output` 描述，须遵守相同类型规则。控制节点的旧 `input` ID 保留为 `flow`，可选 `data` 接收数据；例如 `state.read.output` 应接 `control.end.data`。
 - 每个命名 output 都有独立 preview 和 Details 入口，适合 HTTP、条件、Agent 和信息采集等多结果节点。
+
+以前依赖宽松类型规则的错误连线不会被自动改写。按[端口兼容与旧图修复说明](./docs/STATE_GRAPH_GUIDE.md#端口形状类型与旧图兼容)重新连接到合适端口，或使用声明明确数据类型的转换节点。
 
 当前采用“静态端口描述 + 运行时 JSON 值”的轻量实现，没有照搬 ComfyUI 的动态端口、隐式转换、widget-as-input、惰性求值和二进制对象存储。这使协议、迁移和调试成本保持可控，同时保留后续扩展空间。
 

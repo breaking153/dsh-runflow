@@ -1,0 +1,234 @@
+{
+  "browser": "Chromium",
+  "interaction": {
+    "canvasBefore": {
+      "x": 240,
+      "y": 58,
+      "width": 1200,
+      "height": 842
+    },
+    "canvasDuring": {
+      "x": 240,
+      "y": 58,
+      "width": 1200,
+      "height": 842
+    },
+    "nodeDelta": {
+      "x": 45.241363525390625,
+      "y": 33.93104553222656
+    },
+    "anchorBefore": {
+      "x": 754.7586059570312,
+      "y": 434.0237121582031
+    },
+    "anchorAfter": {
+      "x": 754.7586059570312,
+      "y": 434.0237121582031
+    },
+    "mismatch": {
+      "feedback": "无法连接：text 输出与 number 输入不兼容。",
+      "path": {
+        "fill": "none",
+        "stroke": "rgb(240, 106, 117)"
+      },
+      "edges": []
+    },
+    "alertAfter": "无法连接：text 输出与 number 输入不兼容。",
+    "valid": {
+      "feedback": "text → text · 松开以连接",
+      "path": {
+        "fill": "none",
+        "stroke": "rgb(237, 153, 207)"
+      },
+      "edges": [
+        {
+          "source": "source",
+          "target": "date",
+          "sourceHandle": "text",
+          "targetHandle": "date"
+        }
+      ]
+    },
+    "flowMismatch": {
+      "feedback": "无法连接：flow 输出与 number 输入不兼容。",
+      "path": {
+        "fill": "none",
+        "stroke": "rgb(240, 106, 117)"
+      },
+      "edges": [
+        {
+          "source": "source",
+          "target": "date",
+          "sourceHandle": "text",
+          "targetHandle": "date"
+        }
+      ]
+    },
+    "reverse": {
+      "feedback": "flow → flow · 松开以连接",
+      "path": {
+        "fill": "none",
+        "stroke": "rgb(230, 237, 245)"
+      },
+      "edges": [
+        {
+          "source": "source",
+          "target": "date",
+          "sourceHandle": "text",
+          "targetHandle": "date"
+        },
+        {
+          "source": "first",
+          "target": "second",
+          "sourceHandle": "flow",
+          "targetHandle": "flow"
+        }
+      ]
+    },
+    "matrix": [
+      {
+        "width": 1440,
+        "overflow": false,
+        "controls": {
+          "x": 258,
+          "y": 74,
+          "width": 1164,
+          "height": 38
+        },
+        "settings": {
+          "x": 1012,
+          "y": 42,
+          "width": 420,
+          "height": 384
+        }
+      },
+      {
+        "width": 1024,
+        "overflow": false,
+        "controls": {
+          "x": 70,
+          "y": 72,
+          "width": 940,
+          "height": 38
+        },
+        "settings": {
+          "x": 596,
+          "y": 42,
+          "width": 420,
+          "height": 384
+        }
+      },
+      {
+        "width": 768,
+        "overflow": false,
+        "controls": {
+          "x": 70,
+          "y": 72,
+          "width": 684,
+          "height": 38
+        },
+        "settings": {
+          "x": 340,
+          "y": 42,
+          "width": 420,
+          "height": 384
+        }
+      },
+      {
+        "width": 375,
+        "overflow": false,
+        "controls": {
+          "x": 58,
+          "y": 108,
+          "width": 307,
+          "height": 38
+        },
+        "settings": {
+          "x": 60,
+          "y": 89,
+          "width": 311,
+          "height": 384
+        }
+      }
+    ],
+    "errors": []
+  },
+  "fixture": "Offline preview; no real Host or Agent execution",
+  "supplementary": {
+    "before": {
+      "width": 400,
+      "height": 280,
+      "gesture": false,
+      "dirty": false
+    },
+    "resized": {
+      "width": 448,
+      "height": 328,
+      "gesture": false,
+      "dirty": true
+    },
+    "undone": {
+      "width": 400,
+      "height": 280,
+      "gesture": false,
+      "dirty": true
+    },
+    "redone": {
+      "width": 448,
+      "height": 328,
+      "gesture": false,
+      "dirty": true
+    },
+    "keyboard": {
+      "element": "BUTTON",
+      "name": "添加节点",
+      "focusVisible": true,
+      "outlineStyle": "solid",
+      "outlineWidth": "2px",
+      "outlineColor": "color(srgb 0.545098 0.729412 1 / 0.55)"
+    },
+    "status": {
+      "host": 1,
+      "oldHostStrip": 0,
+      "zoom": 1,
+      "oldControls": 0
+    },
+    "contrast": {
+      "color": "rgb(226, 231, 238)",
+      "background": "rgb(36, 43, 53)"
+    }
+  },
+  "production": {
+    "before": {
+      "x": 240,
+      "y": 58,
+      "width": 1200,
+      "height": 842
+    },
+    "during": {
+      "x": 240,
+      "y": 58,
+      "width": 1200,
+      "height": 842
+    },
+    "feedback": "无法连接：text 输出与 number 输入不兼容。",
+    "mobile": {
+      "fontSize": "0px",
+      "ariaLabel": "添加节点",
+      "iconWidth": 16,
+      "overflow": false
+    },
+    "hostCount": 1,
+    "errors": []
+  },
+  "verification": {
+    "detectorFindings": 0,
+    "baselinePreviewGzipKB": 189.33,
+    "previewJSKB": 688.91,
+    "exitCode": 0,
+    "testFiles": 50,
+    "command": "pnpm check",
+    "tests": 300,
+    "previewGzipKB": 196.05
+  }
+}

@@ -21,8 +21,14 @@ async function setup(root?: string) {
 }
 
 async function settle(flow: FlowService, id: string): Promise<WorkflowExecution> {
-  await vi.waitFor(() => expect(['PENDING', 'RUNNING']).not.toContain(flow.execution(id)?.status))
-  return flow.execution(id)!
+  // PAUSED is exposed only after asynchronous artifact writes drain. Give real
+  // filesystem I/O room within the unchanged 5-second test deadline.
+  return await vi.waitFor(() => {
+    const execution = flow.execution(id)
+    expect(execution).toBeDefined()
+    expect(['PENDING', 'RUNNING']).not.toContain(execution!.status)
+    return execution!
+  }, { timeout: 4000 })
 }
 
 const pausedGraph = (): WorkflowDefinition => ({
@@ -64,7 +70,7 @@ describe('Flow state-graph Host integration', () => {
     expect(() => second.flow.resume(receipt.id, true, { agentId: 'other' })).toThrow(/owned/)
     second.flow.resume(receipt.id, true, { agentId: 'owner' })
     const completed = await settle(second.flow, receipt.id)
-    expect(completed.status).toBe('SUCCESS')
+    expect(completed.status, completed.error).toBe('SUCCESS')
     expect(completed.steps?.flatMap(step => step.nodes).filter(node => node.nodeId === 'start')).toHaveLength(1)
     expect(completed.definition?.nodes.find(node => node.id === 'finish')?.type).toBe('control.end')
   })

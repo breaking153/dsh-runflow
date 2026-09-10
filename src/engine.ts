@@ -19,6 +19,7 @@ import type {
 } from './contracts.ts'
 import type { ExecutionOutputWriter } from './output-store.ts'
 import { executeStateGraph, validateStateGraph } from './state-graph.ts'
+import { compatiblePortTypes } from './port-types.ts'
 
 export class WorkflowValidationError extends Error {
   constructor(readonly issues: WorkflowValidationIssue[]) {
@@ -43,10 +44,6 @@ function inputPorts(provider: WorkflowNodeDefinition | undefined): WorkflowPortD
 
 function outputPorts(provider: WorkflowNodeDefinition | undefined): WorkflowPortDescriptor[] {
   return provider?.outputs === undefined ? [LEGACY_OUTPUT] : provider.outputs
-}
-
-function compatible(source: WorkflowPortDescriptor, target: WorkflowPortDescriptor): boolean {
-  return source.type === 'any' || target.type === 'any' || source.type === target.type
 }
 
 export function validateWorkflow(
@@ -115,11 +112,13 @@ export function validateWorkflow(
           nodeId: edge.to,
         })
       }
-      if (source !== undefined && target !== undefined && !compatible(source, target)) {
+      if (source !== undefined && target !== undefined && !compatiblePortTypes(source.type, target.type)) {
+        const compatibleInputs = targetDescriptors.filter(port => compatiblePortTypes(source.type, port.type))
         issues.push({
           code: 'PORT_TYPE_MISMATCH',
           message: source.type + ' output ' + edge.from + '.' + source.id + ' cannot connect to '
-            + target.type + ' input ' + edge.to + '.' + target.id,
+            + target.type + ' input ' + edge.to + '.' + target.id
+            + (compatibleInputs.length === 0 ? '' : '; compatible input: ' + compatibleInputs.map(port => edge.to + '.' + port.id).join(', ')),
           nodeId: edge.to,
         })
       }

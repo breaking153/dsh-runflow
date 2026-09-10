@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FlowEdge, FlowNode } from '../src/client/store.ts'
 import {
   createGraphHistory,
@@ -10,7 +10,7 @@ import {
   undoGraphHistory,
 } from '../src/client/graph-editing.ts'
 import { commandForKeyboardEvent, isEditableEventTarget, resetEditorKeybindings, setEditorKeybinding } from '../src/client/editor-commands.ts'
-import { useFlowStore } from '../src/client/store.ts'
+import { makeNode, useFlowStore } from '../src/client/store.ts'
 import { rankNodeDescriptors } from '../src/client/node-search.ts'
 import { connectionForNewNode, normalizeNodeConnection } from '../src/client/connection-planning.ts'
 import { FLOW_STYLES } from '../src/client/styles.ts'
@@ -146,6 +146,61 @@ describe('graph clipboard', () => {
     expect(pasted.nodes.map(item => item.position.x)).toEqual([46, 96])
     expect(pasted.nodes.every(item => item.selected)).toBe(true)
     expect(pasted.edges[0]).toMatchObject({ id: 'copy-3', source: 'copy-1', target: 'copy-2' })
+  })
+})
+
+describe('clipboard port metadata', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    useFlowStore.setState(useFlowStore.getInitialState(), true)
+    useFlowStore.setState({ nodes: [], edges: [], graphHistory: createGraphHistory(), dirty: false })
+  })
+  afterEach(() => { vi.clearAllTimers(); vi.useRealTimers() })
+
+  it('refreshes a legacy control template from the current catalog while preserving config and existing edges', () => {
+    const source = makeNode('source', 'script.javascript', { x: 20, y: 40 }, { code: 'return 1' })
+    const legacy = makeNode('branch', 'control.branch', { x: 300, y: 40 }, { source: 'state', path: 'approved', value: true }, 'My approval')
+    legacy.data.inputs = [{ id: 'input', type: 'any', multiple: true }]
+    legacy.data.outputs = [{ id: 'true', type: 'any' }, { id: 'false', type: 'any' }]
+    const oldEdge = { id: 'legacy-link', source: source.id, target: legacy.id, sourceHandle: 'output', targetHandle: 'input', data: { note: 'keep for review' } }
+    const fragment = { nodes: [source, legacy], edges: [oldEdge] }
+    useFlowStore.setState({ graphClipboard: fragment })
+    useFlowStore.getState().pasteSelection()
+    const state = useFlowStore.getState()
+    const copiedSource = state.nodes.find(item => item.data.nodeType === 'script.javascript')!
+    const copied = state.nodes.find(item => item.data.nodeType === 'control.branch')!
+    expect(copied.data.inputs).toEqual(expect.arrayContaining([{ id: 'input', label: 'flow', type: 'flow', multiple: true }, expect.objectContaining({ id: 'data', type: 'any' })]))
+    expect(copied.data.outputs.map(port => port.type)).toEqual(['flow', 'flow'])
+    expect(copied.data.config).toEqual(legacy.data.config)
+    expect(copied.data.label).toBe('My approval')
+    expect(copied.position).toEqual({ x: 336, y: 76 })
+    expect(copied.id).not.toBe(legacy.id)
+    expect(state.edges).toEqual([expect.objectContaining({ source: copiedSource.id, target: copied.id, sourceHandle: 'output', targetHandle: 'input', data: oldEdge.data })])
+    expect(state.graphClipboard).toEqual(fragment)
+    expect(state.graphHistory.past).toHaveLength(1)
+    expect(normalizeNodeConnection(state.nodes, state.edges[0]!)).toBeUndefined()
+  })
+
+  it('keeps a copied current node configuration, name and port contract intact', () => {
+    const original = { ...makeNode('script', 'script.javascript', { x: 50, y: 80 }, { code: 'return input', timeoutMs: 1200 }, 'My transform'), selected: true }
+    useFlowStore.setState({ nodes: [original] })
+    useFlowStore.getState().copySelection()
+    useFlowStore.getState().pasteSelection()
+    const [retained, copied] = useFlowStore.getState().nodes
+    expect(retained).toEqual({ ...original, selected: false })
+    expect(copied).toMatchObject({ data: original.data, position: { x: 86, y: 116 }, selected: true })
+    expect(copied!.id).not.toBe(original.id)
+    expect(copied!.data.inputs).not.toBe(original.data.inputs)
+  })
+
+  it('preserves unknown providers and visual helper ports without guessing their types', () => {
+    const unknown = node('unknown-provider', 0)
+    unknown.data.inputs = [{ id: 'custom', type: 'number' }]
+    const helpers = (['runflow-group', 'runflow-reroute', 'runflow-subflow'] as const).map((type, index) => ({ ...node(type, index * 100), type, data: { ...node(type, index * 100).data, nodeType: 'control.branch', inputs: [{ id: 'custom', type: 'text' as const }] } }))
+    const originals = [unknown, ...helpers]
+    useFlowStore.setState({ graphClipboard: { nodes: originals, edges: [] } })
+    useFlowStore.getState().pasteSelection()
+    expect(useFlowStore.getState().nodes.map(item => item.data)).toEqual(originals.map(item => item.data))
   })
 })
 

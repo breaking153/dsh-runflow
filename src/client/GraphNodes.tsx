@@ -2,6 +2,7 @@ import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
 import { Box, Group, Route } from 'lucide-react'
 import type { FlowNode } from './store.ts'
 import { useFlowStore } from './store.ts'
+import { PortRow } from './WorkflowNode.tsx'
 
 export function WorkflowGroupNode({ id, data, selected }: NodeProps<FlowNode>) {
   const begin = useFlowStore(state => state.beginGraphGesture)
@@ -21,12 +22,12 @@ export function RerouteNode({ selected }: NodeProps<FlowNode>) {
   </div>
 }
 
-export function SubflowNode({ data, selected }: NodeProps<FlowNode>) {
-  return <div className={'subflow-node ' + (selected ? 'selected' : '')}>
+export function SubflowNode({ id, data, selected }: NodeProps<FlowNode>) {
+  return <div className={'subflow-node workflow-node ' + (selected ? 'selected is-selected' : '')}>
     <header><span><Box size={15} /></span><div><strong>{data.label}</strong><small>Executable subflow</small></div></header>
-    <div className="subflow-ports">
-      <div>{data.inputs.map(port => <div className="subflow-port input" key={port.id}><Handle id={port.id} type="target" position={Position.Left} /><span>{port.label ?? port.id}</span><em>{port.type}</em></div>)}</div>
-      <div>{data.outputs.map(port => <div className="subflow-port output" key={port.id}><span>{port.label ?? port.id}</span><em>{port.type}</em><Handle id={port.id} type="source" position={Position.Right} /></div>)}</div>
+    <div className="node-port-grid">
+      <div className="port-column input-column">{data.inputs.map(port => <PortRow key={port.id} nodeId={id} port={port} direction="input" value={undefined} />)}</div>
+      <div className="port-column output-column">{data.outputs.map(port => <PortRow key={port.id} nodeId={id} port={port} direction="output" value={undefined} />)}</div>
     </div>
     <footer>Double-click to open</footer>
   </div>

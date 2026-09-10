@@ -73,7 +73,7 @@ Host 还会按本次调用来源选择实际入口：
 | `sum` | 对有限数值求和；缺省初值为 `0` | 更新表示增量，不是最终计数；溢出会报错 |
 | `merge` | 对 JSON 对象做浅合并；缺省初值为 `{}` | 同名属性由归约顺序中较后的更新覆盖，不是递归深合并 |
 
-在节点库搜索下表中的类型或标题，选中节点后在 Inspector 配置。控制节点使用固定命名输出端口，连线必须连接到要激活的端口。
+在节点库搜索下表中的类型或标题，选中节点后在 Inspector 配置。控制节点使用固定命名端口；尖角表示 `flow`，圆形表示数据。旧 `input` 端口 ID 保留为控制流入口，多数控制节点另有可选 `data: any` 数据入口；Join 和 Read State 只接控制流。
 
 | 节点 | 配置 | 输出与行为 |
 | --- | --- | --- |
@@ -82,16 +82,37 @@ Host 还会按本次调用来源选择实际入口：
 | `control.parallel` | `branchCount` 为 1–4，默认 2 | 在下一步激活 `branch1`–`branch4` 中配置的分支；这是固定分支，不是动态任务列表 |
 | `control.join` | 无必填配置；将需要等待的各分支连到 `input` | 每条入边收到一条新消息才执行，输出 `output`；只用于所有分支都会到达的情况 |
 | `control.loop` | `maxIterations` 为 0–1000，默认 10；可加与 Branch 相同的条件 | 未超出迭代数且条件成立时输出 `continue`，否则 `done`；将循环体末尾连回 Loop |
-| `state.read` | `path`，默认空字符串 | 从已提交状态读取该路径，空路径返回整个对象，缺失值返回 `null` |
+| `state.read` | `path`，默认空字符串 | 从已提交状态读取该路径，从 `output: json` 输出；空路径返回整个对象，缺失值返回 `null` |
 | `state.update` | `key`（默认 `result`）、`source: input/value/state`、`path`、可选 `value` | 更新一个顶层状态键，使用工作流对应归约器；输出仍传递原输入 |
 | `control.interrupt` | `prompt`（JSON），`stateKey`（默认 `approval`） | 首次暂停；恢复值写入 `stateKey`，并从 `output` 传出 |
-| `control.end` | 无必填配置 | 结束当前分支；其他活跃分支可以继续完成 |
+| `control.end` | 无必填配置；控制流接 `input`，数据接 `data` | 结束当前分支，输出描述为 `json`；优先返回显式 `data` 值，否则使用控制流 payload；其他活跃分支可以继续完成 |
 
 比较运算支持 `equals/notEquals/contains/greaterThan/lessThan/exists/truthy`。路径使用点分段，如 `request.amount`；空路径读取整个选定值，保留对象键 `__proto__`、`constructor`、`prototype` 不可用。Loop 未配置 `path` 或 `operator` 时只检查迭代上限；需要条件时明确配置它们。
 
-普通状态节点采用 any-input 激活：任一入边有新消息即可运行，同一步的消息合并为一次激活。互斥的 Branch/Switch 两路应该汇到这种普通节点。不要把互斥分支接到 `control.join` 后期待它自动忽略未执行的一路；没有足够消息的 all-input Join 会明确失败。输入端口接收多条消息仍须声明 `multiple: true`，共享状态归约不能代替输入端口基数校验。
+普通状态节点采用 any-input 激活：任一入边有新消息即可运行，同一步的消息合并为一次激活。互斥的 Branch/Switch 两路应该汇到这种普通节点。不要把互斥分支接到 `control.join` 后期待它自动忽略未执行的一路；没有足够消息的 all-input Join 会明确失败。状态图允许多条入边声明到同一端口，以便在不同步骤或互斥分支传值；同一步实际收到多条消息时，该输入仍需 `multiple: true`，否则会报运行错误。DAG 的单输入占用检查发生在连接与图校验时，不能将其等同于状态图的调度规则。
 
 `maxIterations` 限制 Loop 节点走 `continue` 的次数，`maxSteps` 限制整图步骤。循环体有多个串行节点时，应为一次迭代预留多个步骤。仍有节点待执行而步数上限已用尽时，流程会保留执行证据并失败，不会静默报告成功。
+
+## 端口形状、类型与旧图兼容
+
+蓝图工作台用尖角执行端口、圆形数据端口和可见类型名区分控制流与数据。端口的透明命中区域固定为 28px，悬停不会缩放或移动连接中心。拖线到不兼容目标时立即显示红线与原因；松开不创建错误边，也不会弹出节点选择器。拖到空白画布仍可选择兼容节点，反向从输入拖到输出也会规范化为输出到输入。
+
+| 输出 | 允许的输入 | 拒绝的例子 |
+| --- | --- | --- |
+| `flow` | 仅 `flow` | `flow → any/json` |
+| 已知数据类型 | 同类型，或显式 `any` 数据输入 | `text → number`、`number → json`、`file → files` |
+| `any` | 仅 `any` | `any → json/number/flow` |
+
+`any` 是接收任意数据的显式选择，不是执行信号与数据之间的转换器，也不让未知输出冒充已知类型。前端和 Host 从同一份类型规则读取此约束；自定义 Provider 应如实声明数据类型。无法兼容时使用明确转换节点，不要只改标签绕过实际语义。
+
+本轮保留旧 Workflow 格式、控制节点 `input` ID、状态设置和执行所属关系，不自动重写用户文件。旧的错误类型连线可能因此被拒绝，需要手动调整：
+
+- `state.read.output` 声明为 `json`，不能再接 `control.end.input` 的 `flow`；应改接 `control.end.data`。有限循环与并行归约示例已经采用这条连线。
+- Branch、Switch、Loop、Parallel、State Update、Interrupt 和 End 可通过 `data` 接收普通数据。显式 `data` 值优先使用且不拆开形似 flow 的业务对象；未接数据时继续读取控制流 payload。
+- Join 与 State Read 没有 `data` 入口。不要把数据线连接到它们的 `input`；Join 等待的是各控制流分支。
+- `source: "input"` 仍表示节点本次接收的业务值，既可以来自显式 `data`，也可以来自控制流 payload，不表示只能接端口 ID `input`。
+
+这不是 UE 的双通道执行模型：状态图仍由到达的消息激活节点，可选 `data` 不会自动等待另一条 flow 线。若两路在同一步到达，会一起交给节点；若在不同步骤到达，可能分别激活。需要确定等待关系时应显式设计控制流、Join 与状态归约。
 
 ## 暂停、恢复与执行证据
 

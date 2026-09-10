@@ -63,6 +63,7 @@ const STORAGE_KEY = 'dsh-runflow:workspace-draft'
 const WORKSPACE_STORAGE_KEY = 'dsh-runflow:workflows'
 const OPEN_TABS_KEY = 'dsh-runflow:open-workflow-tabs'
 let autosaveTimer: number | undefined
+let graphGestureCleanup: (() => void) | undefined
 let workspaceRefreshRequest = 0
 const workflowPersistence = createWorkflowPersistenceQueue()
 const DEFAULT_INPUT: WorkflowPortDescriptor = { id: 'input', label: 'input', type: 'any' }
@@ -197,7 +198,7 @@ function persistOpenWorkflowIds(ids: string[]): void {
 }
 
 function scheduleAutosave(): void {
-  if (typeof window === 'undefined') return
+  if (typeof window === 'undefined' || useFlowStore.getState().graphGestureSnapshot !== undefined) return
   if (autosaveTimer !== undefined) window.clearTimeout(autosaveTimer)
   const gateway = getRunFlowGateway()
   const agentId = getRunFlowClientContext()?.agentId
@@ -304,8 +305,8 @@ function definitionOf(state: Pick<FlowState, 'workflowId' | 'workflowName' | 'wo
     id: node.id,
     label: node.data.label,
     position: node.position,
-    width: numericStyle(node.style?.width, 360),
-    height: numericStyle(node.style?.height, 260),
+    width: node.width ?? numericStyle(node.style?.width, 360),
+    height: node.height ?? numericStyle(node.style?.height, 260),
     nodeIds: node.data.memberNodeIds ?? [],
   }))
   const reroutes = rootNodes.filter(node => node.type === 'runflow-reroute').map(node => ({ id: node.id, position: node.position }))
@@ -347,7 +348,7 @@ function definitionOf(state: Pick<FlowState, 'workflowId' | 'workflowName' | 'wo
       inputs: subflow.inputs, outputs: subflow.outputs,
       groups: subflow.nodes.filter(node => node.type === 'runflow-group').map(node => ({
         id: node.id, label: node.data.label, position: node.position,
-        width: numericStyle(node.style?.width, 360), height: numericStyle(node.style?.height, 260),
+        width: node.width ?? numericStyle(node.style?.width, 360), height: node.height ?? numericStyle(node.style?.height, 260),
         nodeIds: node.data.memberNodeIds ?? [],
       })),
       reroutes: subflow.nodes.filter(node => node.type === 'runflow-reroute').map(node => ({ id: node.id, position: node.position })),
@@ -733,14 +734,14 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     }
   },
   onNodesChange(changes) {
-    const meaningful = changes.some(change => change.type === 'position' || change.type === 'remove' || change.type === 'add')
+    const meaningful = changes.some(change => change.type === 'position' || change.type === 'remove' || change.type === 'add' || (change.type === 'dimensions' && change.setAttributes === true))
     const structural = changes.some(change => change.type === 'remove' || change.type === 'add')
     set(state => ({
       ...(structural ? { graphHistory: pushGraphHistory(state.graphHistory, { nodes: state.nodes, edges: state.edges }) } : {}),
       nodes: applyNodeChanges(changes, state.nodes),
       ...(meaningful ? editedDraft(state) : {}),
     }))
-    if (meaningful) scheduleAutosave()
+    if (meaningful && get().graphGestureSnapshot === undefined) scheduleAutosave()
   },
   onEdgesChange(changes) {
     const meaningful = changes.some(change => change.type === 'remove' || change.type === 'add' || change.type === 'replace')
@@ -764,15 +765,40 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   },
   beginGraphGesture() {
     if (get().graphGestureSnapshot !== undefined) return
+    graphGestureCleanup?.()
+    if (autosaveTimer !== undefined && typeof window !== 'undefined') { window.clearTimeout(autosaveTimer); autosaveTimer = undefined }
     set(state => ({ graphGestureSnapshot: structuredClone({ nodes: state.nodes, edges: state.edges }) }))
+    if (typeof window !== 'undefined') {
+      const snapshot = get().graphGestureSnapshot
+      let releaseTimer: number | undefined
+      const releases = ['pointerup', 'pointercancel', 'mouseup', 'touchend', 'touchcancel', 'blur'] as const
+      // A resize-handle click may start without React Flow ever emitting resize-end.
+      // Defer the fallback so the final position/dimension event commits first.
+      const release = (event: Event): void => {
+        if (event.type === 'blur' && event.target !== window) return
+        if (releaseTimer !== undefined) return
+        releaseTimer = window.setTimeout(() => {
+          cleanup()
+          if (get().graphGestureSnapshot === snapshot) get().endGraphGesture()
+        }, 0)
+      }
+      const cleanup = (): void => {
+        for (const event of releases) window.removeEventListener(event, release, true)
+        if (releaseTimer !== undefined) window.clearTimeout(releaseTimer)
+        if (graphGestureCleanup === cleanup) graphGestureCleanup = undefined
+      }
+      graphGestureCleanup = cleanup
+      for (const event of releases) window.addEventListener(event, release, true)
+    }
   },
   endGraphGesture() {
+    graphGestureCleanup?.()
     set(state => {
       if (state.graphGestureSnapshot === undefined) return state
       const before = state.graphGestureSnapshot
       const changed = before.nodes.some((node, index) => {
         const current = state.nodes[index]
-        return current === undefined || current.id !== node.id || current.position.x !== node.position.x || current.position.y !== node.position.y
+        return current === undefined || current.id !== node.id || current.position.x !== node.position.x || current.position.y !== node.position.y || current.width !== node.width || current.height !== node.height
       })
       return {
         graphGestureSnapshot: undefined,
@@ -822,9 +848,19 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     set(state => {
       if (state.graphClipboard === undefined || state.graphClipboard.nodes.length === 0) return state
       const pasted = pasteGraphFragment(state.graphClipboard, state.nodes, state.edges)
+      const pastedNodes = pasted.nodes.map(node => {
+        if (node.type !== 'workflow') return node
+        const descriptor = state.nodeCatalog.find(item => item.type === node.data.nodeType)
+        if (descriptor === undefined) return node
+        return { ...node, data: {
+          ...node.data,
+          inputs: structuredClone(descriptor.inputs ?? [DEFAULT_INPUT]),
+          outputs: structuredClone(descriptor.outputs ?? [DEFAULT_OUTPUT]),
+        } }
+      })
       return {
         graphHistory: pushGraphHistory(state.graphHistory, { nodes: state.nodes, edges: state.edges }),
-        nodes: [...state.nodes.map(node => ({ ...node, selected: false })), ...pasted.nodes],
+        nodes: [...state.nodes.map(node => ({ ...node, selected: false })), ...pastedNodes],
         edges: [...state.edges.map(edge => ({ ...edge, selected: false })), ...pasted.edges],
         selectedNodeId: pasted.nodes[0]?.id,
         ...editedDraft(state),
