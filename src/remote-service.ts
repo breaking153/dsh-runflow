@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import type { WorkflowDefinition, WorkflowExecution } from './contracts.ts'
+import type { JsonValue, WorkflowDefinition, WorkflowExecution } from './contracts.ts'
 import type {
   RunFlowStartReceipt,
   RunFlowStartRequest,
@@ -41,13 +41,17 @@ function executionDefinition(
     edges: definition.edges
       .filter(edge => included.has(edge.from) && included.has(edge.to))
       .map(edge => structuredClone(edge)),
+    ...(definition.execution?.mode !== 'state-graph' ? {} : {
+      execution: { ...definition.execution,
+        ...(definition.execution.entryNodeIds === undefined ? {} : { entryNodeIds: definition.execution.entryNodeIds.filter(id => included.has(id)) }),
+      },
+    }),
   }
 }
 
 /** Agent-authorized UI bridge into the Host-owned RunFlow workspace. */
 export class RunFlowRemoteService extends TypertRemoteService {
   static inject = ['flow', 'agents', 'tools']
-  private readonly owners = new Map<string, string>()
 
   constructor(ctx: Context) {
     super(ctx, 'runflowRemote', { namespace: 'runflow' })
@@ -55,8 +59,8 @@ export class RunFlowRemoteService extends TypertRemoteService {
 
   @Remote
   workspace(agent: Agent): RunFlowWorkspaceSnapshot {
-    const creationMode = (agent.session?.header as { agentPreset?: string } | undefined)?.agentPreset === 'cordis'
-    if (creationMode) ensureRunFlowAgentAuthoring(this.ctx, this.ctx.flow, agent)
+    const creationMode = (agent.session?.header as { agentPreset?: string } | undefined)?.agentPreset === this.ctx.flow.authoringPresetId
+    if (creationMode) ensureRunFlowAgentAuthoring(this.ctx, this.ctx.flow, agent, this.ctx.flow.authoringPresetId)
     const tools = this.ctx.get('tools') as { get(name: string, scope?: unknown): unknown } | undefined
     const subagents = this.ctx.get('subagents')
     const subagentProviders = subagents?.list().flatMap((id) => {
@@ -72,7 +76,7 @@ export class RunFlowRemoteService extends TypertRemoteService {
     return {
       apiVersion: 2,
       workflows: this.ctx.flow.listWorkflows(),
-      executions: this.ctx.flow.listExecutions(undefined, 200),
+      executions: this.ctx.flow.listExecutions(undefined, 200).filter(execution => this.ctx.flow.executionOwnedBy(execution.id, String(agent.id))),
       nodes: this.ctx.flow.listNodes(),
       subagentProviders,
       capabilities: {
@@ -80,6 +84,7 @@ export class RunFlowRemoteService extends TypertRemoteService {
         runCode: tools?.get('run_code', agent) !== undefined,
         nodeAuthoring: tools?.get('runflow_node', agent) !== undefined,
         sourceAuthoring: creationMode,
+        triggers: this.ctx.flow.triggerCapabilities(),
       },
     }
   }
@@ -106,7 +111,6 @@ export class RunFlowRemoteService extends TypertRemoteService {
         ? {}
         : { outputDir: request.outputDir.trim() }),
     })
-    this.owners.set(execution.id, String(agent.id))
     return { executionId: execution.id, execution }
   }
 
@@ -123,6 +127,28 @@ export class RunFlowRemoteService extends TypertRemoteService {
   }
 
   @Remote
+  resume(agent: Agent, executionId: string, value: JsonValue): RunFlowStartReceipt {
+    this.assertOwner(agent, executionId)
+    const execution = this.ctx.flow.resume(executionId, value, { agentId: String(agent.id) })
+    return { executionId: execution.id, execution }
+  }
+
+  @Remote
+  webhook(agent: Agent, workflowId: string) {
+    return this.ctx.flow.webhooks.get(agent, workflowId)
+  }
+
+  @Remote
+  enableWebhook(agent: Agent, workflowId: string, triggerNodeId: string) {
+    return this.ctx.flow.webhooks.enable(agent, workflowId, triggerNodeId)
+  }
+
+  @Remote
+  disableWebhook(agent: Agent, workflowId: string): boolean {
+    return this.ctx.flow.webhooks.disable(agent, workflowId)
+  }
+
+  @Remote
   sources(agent: Agent) {
     this.assertCreationMode(agent)
     return this.ctx.flow.listPluginSources()
@@ -135,13 +161,13 @@ export class RunFlowRemoteService extends TypertRemoteService {
   }
 
   private assertOwner(agent: Agent, executionId: string): void {
-    if (this.owners.get(executionId) !== String(agent.id)) {
+    if (!this.ctx.flow.executionOwnedBy(executionId, String(agent.id))) {
       throw new Error('RunFlow execution is not owned by this Agent: ' + executionId)
     }
   }
 
   private assertCreationMode(agent: Agent): void {
-    if ((agent.session?.header as { agentPreset?: string } | undefined)?.agentPreset !== 'cordis') {
+    if ((agent.session?.header as { agentPreset?: string } | undefined)?.agentPreset !== this.ctx.flow.authoringPresetId) {
       throw new Error('Trusted Node/Script source editing is limited to the DSH creation preset')
     }
   }

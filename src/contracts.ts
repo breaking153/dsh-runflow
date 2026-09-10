@@ -19,6 +19,30 @@ export type NodeOutputEnvelope = {
   outputs: JsonObject
 }
 
+/** Declarative state updates and routing; never evaluated as source code. */
+export type NodeControlEnvelope = {
+  $runflow: 'control'
+  /** Omitted outputs pass the current input through the first output port. */
+  outputs?: JsonObject
+  update?: JsonObject
+  /** Active output port ids. Empty explicitly ends this branch. */
+  routes?: string[]
+  /** Finish the entire graph after committing the current super-step. */
+  halt?: boolean
+  /** Pause at this node boundary; resume may execute the node again. */
+  interrupt?: JsonValue
+}
+
+export type WorkflowStateReducer = 'replace' | 'append' | 'sum' | 'merge'
+export interface WorkflowExecutionConfig {
+  mode: 'dag' | 'state-graph'
+  entryNodeIds?: string[]
+  /** Maximum committed super-steps, between 1 and 1000. Defaults to 100. */
+  maxSteps?: number
+  initialState?: JsonObject
+  reducers?: Record<string, WorkflowStateReducer>
+}
+
 export interface NodeExecutionLogEntry {
   timestamp: string
   level: 'debug' | 'info' | 'warn' | 'error'
@@ -124,13 +148,51 @@ export interface WorkflowDefinition {
   createdAt?: string
   updatedAt?: string
   ui?: WorkflowUiState
+  execution?: WorkflowExecutionConfig
 }
 
-export type ExecutionStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'CANCELLED'
-export type NodeExecutionStatus = 'WAITING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'SKIPPED' | 'CANCELLED'
+export type ExecutionStatus = 'PENDING' | 'RUNNING' | 'PAUSED' | 'SUCCESS' | 'FAILED' | 'CANCELLED'
+export type NodeExecutionStatus = 'WAITING' | 'RUNNING' | 'PAUSED' | 'SUCCESS' | 'FAILED' | 'SKIPPED' | 'CANCELLED'
+
+export interface WorkflowActivation {
+  nodeId: string
+  /** Stable definition.edges index, used to distinguish join channels. */
+  edgeIndex?: number
+  from?: string
+  sourcePort?: string
+  targetPort?: string
+  value: JsonValue
+}
+
+export interface WorkflowStepRecord {
+  step: number
+  nodes: NodeExecutionRecord[]
+  state: JsonObject
+}
+
+/** Persisted only at a completed step boundary. Not an exactly-once guarantee. */
+export interface WorkflowGraphCheckpoint {
+  schemaVersion: 1
+  workflowId: string
+  workflowVersion: number
+  executionId: string
+  startedAt?: string
+  step: number
+  state: JsonObject
+  pending: WorkflowActivation[]
+  joins: Record<string, WorkflowActivation[]>
+  iterations: Record<string, number>
+  nodes: NodeExecutionRecord[]
+  steps: WorkflowStepRecord[]
+  lastOutputs: JsonObject
+  lastPortOutputs: Record<string, JsonObject>
+  interrupts: JsonObject
+}
 
 export interface NodeExecutionRecord {
   nodeId: string
+  step?: number
+  iteration?: number
   status: NodeExecutionStatus
   input?: JsonValue
   inputPorts?: JsonObject
@@ -148,6 +210,9 @@ export interface NodeExecutionRecord {
 export interface WorkflowExecution {
   id: string
   workflowId: string
+  ownerAgentId?: string
+  /** Frozen workflow used to resume this execution across Host restarts. */
+  definition?: WorkflowDefinition
   version: number
   status: ExecutionStatus
   trigger: string
@@ -159,6 +224,10 @@ export interface WorkflowExecution {
   startedAt?: string
   finishedAt?: string
   nodes: NodeExecutionRecord[]
+  state?: JsonObject
+  step?: number
+  steps?: WorkflowStepRecord[]
+  checkpoint?: WorkflowGraphCheckpoint
 }
 
 export type NodeCategory = 'trigger' | 'action' | 'logic' | 'ai' | 'data'
@@ -178,6 +247,8 @@ export interface WorkflowNodeDescriptor {
   inputs?: WorkflowPortDescriptor[]
   outputs?: WorkflowPortDescriptor[]
   available?: boolean
+  /** State graph activation: any message, or one from every incoming edge. */
+  activation?: 'any' | 'all'
 }
 
 export interface NodeExecutionContext {
@@ -189,6 +260,10 @@ export interface NodeExecutionContext {
   input: JsonValue
   inputs: Readonly<JsonObject>
   vars: Readonly<JsonObject>
+  state?: Readonly<JsonObject>
+  step?: number
+  iteration?: number
+  resume?: { value: JsonValue }
   signal: AbortSignal
   outputDir?: string
   intermediateDir?: string
@@ -197,7 +272,7 @@ export interface NodeExecutionContext {
 }
 
 export interface WorkflowNodeDefinition extends WorkflowNodeDescriptor {
-  execute(context: NodeExecutionContext): Promise<JsonValue | NodeOutputEnvelope>
+  execute(context: NodeExecutionContext): Promise<JsonValue | NodeOutputEnvelope | NodeControlEnvelope>
 }
 
 export interface ExecuteWorkflowOptions {
@@ -210,6 +285,11 @@ export interface ExecuteWorkflowOptions {
   /** Per-run base directory. A workflow and then plugin default are used when omitted. */
   outputDir?: string
   signal?: AbortSignal
+  /** Trusted caller-selected entry points, e.g. one matching webhook trigger. */
+  entryNodeIds?: string[]
+  checkpoint?: WorkflowGraphCheckpoint
+  /** Answers keyed by interrupted node id; missing answers leave the graph paused. */
+  resumeValues?: JsonObject
 }
 
 export interface FlowSubagentProviderInfo {
@@ -257,6 +337,8 @@ export interface FlowRuntimeCatalog {
 }
 
 export interface FlowConfig {
+  /** Install authenticated webhook ingress when the Host has a router. Defaults to true. */
+  enableWebhooks?: boolean
   apiPrefix?: string
   maxParallelNodes?: number
   defaultTimeoutMs?: number
@@ -276,7 +358,7 @@ export interface FlowConfig {
 }
 
 export interface WorkflowValidationIssue {
-  code: 'DUPLICATE_NODE' | 'MISSING_NODE' | 'SELF_EDGE' | 'CYCLE' | 'EMPTY_WORKFLOW' | 'UNKNOWN_PORT' | 'PORT_TYPE_MISMATCH' | 'PORT_CARDINALITY'
+  code: 'DUPLICATE_NODE' | 'MISSING_NODE' | 'SELF_EDGE' | 'CYCLE' | 'EMPTY_WORKFLOW' | 'UNKNOWN_PORT' | 'PORT_TYPE_MISMATCH' | 'PORT_CARDINALITY' | 'INVALID_EXECUTION'
   message: string
   nodeId?: string
 }

@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Check, CircleAlert, Expand, LoaderCircle } from 'lucide-react'
+import { Check, CircleAlert, Expand, LoaderCircle, Pause } from 'lucide-react'
 import { useRef, useState, type CSSProperties } from 'react'
 import type { JsonValue, WorkflowPortDescriptor, WorkflowPortType } from '../contracts.ts'
 import type { FlowNode } from './store.ts'
@@ -9,7 +9,7 @@ import { useRunFlowLocale, type RunFlowLocaleKey } from './locale.ts'
 
 const statusCopy: Record<FlowNode['data']['status'], RunFlowLocaleKey> = {
   WAITING: 'ready', RUNNING: 'running', SUCCESS: 'success',
-  FAILED: 'failed', SKIPPED: 'skipped', CANCELLED: 'cancelled',
+  FAILED: 'failed', SKIPPED: 'skipped', CANCELLED: 'cancelled', PAUSED: 'paused',
 } as const
 
 const PORT_COLORS: Record<WorkflowPortType, string> = {
@@ -19,6 +19,7 @@ const PORT_COLORS: Record<WorkflowPortType, string> = {
 
 function StatusIcon({ status }: { status: FlowNode['data']['status'] }) {
   if (status === 'RUNNING') return <LoaderCircle size={13} className="flow-spin" />
+  if (status === 'PAUSED') return <Pause size={13} />
   if (status === 'SUCCESS') return <Check size={13} />
   if (status === 'FAILED') return <CircleAlert size={13} />
   return <span className="node-status-dot" />

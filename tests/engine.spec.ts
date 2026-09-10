@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { JsonValue, WorkflowDefinition, WorkflowNodeDefinition } from '../src/contracts.ts'
 import { executeWorkflow, validateWorkflow } from '../src/engine.ts'
@@ -15,6 +15,48 @@ function provider(type: string, execute: WorkflowNodeDefinition['execute']): Wor
 }
 
 describe('workflow engine', () => {
+  it('requires state graph mode for control nodes and control envelopes', async () => {
+    expect(validateWorkflow(workflow([{ id: 'end', type: 'control.end', config: {} }], [])))
+      .toContainEqual(expect.objectContaining({ code: 'INVALID_EXECUTION' }))
+    const result = await executeWorkflow(workflow([{ id: 'custom', type: 'custom', config: {} }], []), {}, {
+      maxParallelNodes: 1, defaultTimeoutMs: 500,
+      resolveNode: () => provider('custom', async () => ({ $runflow: 'control', update: { count: 1 } })),
+    })
+    expect(result.status).toBe('FAILED')
+    expect(result.error).toContain('requires state-graph')
+  })
+
+  it('prunes non-selected trigger entries and their descendants', async () => {
+    const called: string[] = []
+    const definition = workflow([
+      { id: 'manual', type: 'echo', config: {} }, { id: 'webhook', type: 'echo', config: {} },
+      { id: 'manual-work', type: 'echo', config: {} }, { id: 'webhook-work', type: 'echo', config: {} },
+    ], [{ from: 'manual', to: 'manual-work' }, { from: 'webhook', to: 'webhook-work' }])
+    const result = await executeWorkflow(definition, { entryNodeIds: ['webhook'] }, {
+      maxParallelNodes: 2, defaultTimeoutMs: 500,
+      resolveNode: () => provider('echo', async ({ node }) => { called.push(node.id); return node.id }),
+    })
+    expect(result.status).toBe('SUCCESS')
+    expect(called).toEqual(['webhook', 'webhook-work'])
+  })
+
+  it('does not activate a missing default output or descendants of a skipped branch', async () => {
+    const called: string[] = []
+    const providers = new Map([
+      ['router', { ...provider('router', async () => ({ $runflow: 'port-outputs', outputs: { fallback: null } })), outputs: [{ id: 'match', type: 'any' as const }, { id: 'fallback', type: 'any' as const }] }],
+      ['echo', provider('echo', async ({ node, input }) => { called.push(node.id); return input })],
+    ])
+    const result = await executeWorkflow(workflow([
+      { id: 'router', type: 'router', config: {} }, { id: 'match', type: 'echo', config: {} },
+      { id: 'fallback', type: 'echo', config: {} }, { id: 'after-match', type: 'echo', config: {} },
+    ], [{ from: 'router', to: 'match' }, { from: 'router', sourcePort: 'fallback', to: 'fallback' }, { from: 'match', to: 'after-match' }]), {}, {
+      maxParallelNodes: 2, defaultTimeoutMs: 500, resolveNode: type => providers.get(type),
+    })
+    expect(result.status).toBe('SUCCESS')
+    expect(called).toEqual(['fallback'])
+    expect(result.nodes.find(node => node.nodeId === 'fallback')?.input).toBe(null)
+  })
+
   it('preserves an already-cancelled parent signal without executing a node', async () => {
     let executed = false
     const node = provider('cancel-probe', async () => { executed = true; return null })
@@ -125,6 +167,31 @@ describe('workflow engine', () => {
 })
 
 describe('typed ports and execution output', () => {
+  it('gives state graph providers the actual sanitized per-visit artifact directories', async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), 'dsh-runflow-state-paths-'))
+    const definition = workflow([{ id: '..', type: 'paths', config: {} }], [])
+    definition.execution = { mode: 'state-graph' }
+    let nodeDir = ''
+    let intermediateDir = ''
+    const node = provider('paths', async context => {
+      nodeDir = context.outputDir ?? ''
+      intermediateDir = context.intermediateDir ?? ''
+      await context.writeIntermediate('sample', { ok: true })
+      return { ok: true }
+    })
+    try {
+      const execution = await executeWorkflow(definition, {}, {
+        maxParallelNodes: 1, defaultTimeoutMs: 500, resolveNode: () => node,
+        createOutput: current => new FileExecutionOutput(baseDir, definition, current),
+      })
+      expect(execution.status).toBe('SUCCESS')
+      const output = execution.artifacts?.find(artifact => artifact.kind === 'output')
+      const intermediate = execution.artifacts?.find(artifact => artifact.kind === 'intermediate')
+      expect(resolve(nodeDir)).toBe(dirname(output!.path))
+      expect(resolve(intermediateDir)).toBe(dirname(intermediate!.path))
+      expect(resolve(nodeDir)).toBe(join(execution.outputDir!, 'nodes', 'item', 'steps', '1-1'))
+    } finally { await rm(baseDir, { recursive: true, force: true }) }
+  })
   it('routes explicit typed multi-output ports and rejects incompatible connections', async () => {
     const definitions = new Map<string, WorkflowNodeDefinition>([
       ['typed.source', {

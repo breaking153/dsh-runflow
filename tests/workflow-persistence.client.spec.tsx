@@ -50,7 +50,8 @@ beforeEach(() => {
       },
       delete: vi.fn(async () => true),
     },
-    executions: { start: vi.fn(), read: vi.fn(), cancel: vi.fn() },
+    webhooks: { read: vi.fn(), enable: vi.fn(), disable: vi.fn() },
+    executions: { resume: vi.fn(), start: vi.fn(), read: vi.fn(), cancel: vi.fn() },
     sources: { list: vi.fn(), save: vi.fn() },
     reviews: { read: vi.fn(), accept: vi.fn() },
   }

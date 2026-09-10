@@ -45,7 +45,7 @@ describe('RunFlow editor redesign contracts', () => {
       'builtin.date-time',
       'builtin.noop',
     ]))
-    expect(NODE_CATALOG.flatMap(node => [
+    expect(NODE_CATALOG.filter(node => node.type.startsWith('builtin.')).flatMap(node => [
       ...(node.inputs ?? []),
       ...(node.outputs ?? []),
     ]).some(port => port.type === 'any')).toBe(false)

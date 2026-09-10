@@ -4,6 +4,7 @@ import type {
   NodeExecutionContext,
   WorkflowNodeDefinition,
 } from '../src/contracts.ts'
+import { controlNodeDefinitions } from './control-nodes.ts'
 
 export type AgentNodeExecutor = (context: NodeExecutionContext) => Promise<JsonValue>
 
@@ -96,6 +97,7 @@ function numericValues(value: JsonValue, path: string): number[] {
 
 export function builtinNodeDefinitions(executeAgent: AgentNodeExecutor): WorkflowNodeDefinition[] {
   return [
+    ...controlNodeDefinitions(),
     {
       type: 'trigger.manual',
       title: 'Manual Trigger',
@@ -108,16 +110,29 @@ export function builtinNodeDefinitions(executeAgent: AgentNodeExecutor): Workflo
       async execute({ input: value }) { return flowSignal('manual', value) },
     },
     {
+      type: 'trigger.agent',
+      title: 'Agent Trigger',
+      description: 'Accept JSON input from an authorized DSH Agent calling RunFlow.',
+      category: 'trigger', color: '#22c55e', icon: 'bot', inputs: [], outputs: [flowOutput],
+      async execute({ input: value, agentId }) {
+        if (agentId === undefined) throw new Error('Agent Trigger requires a live DSH Agent caller')
+        return flowSignal('agent', value)
+      },
+    },
+    {
       type: 'trigger.webhook',
       title: 'Webhook',
-      description: 'Inbound listener is not installed; use Manual Trigger with Run Input.',
+      description: 'Accept JSON input through an authenticated live Host webhook binding.',
       category: 'trigger',
       color: '#22c55e',
       icon: 'webhook',
       inputs: [],
       outputs: [flowOutput],
       available: false,
-      execute: unavailableTrigger,
+      async execute({ input: value, agentId }) {
+        if (agentId === undefined) throw new Error('Webhook Trigger requires an authorized Host binding')
+        return flowSignal('webhook', value)
+      },
     },
     {
       type: 'trigger.schedule',

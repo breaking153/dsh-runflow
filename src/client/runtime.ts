@@ -3,11 +3,13 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
-import type { WorkflowDefinition, WorkflowExecution } from '../contracts.ts'
+import type { JsonValue, WorkflowDefinition, WorkflowExecution } from '../contracts.ts'
 import type { RunFlowPluginSource, SaveRunFlowPluginSourceRequest } from '../plugin-sources.ts'
 import {
   RUNFLOW_REMOTE,
   type RunFlowStartReceipt,
+  type RunFlowWebhookBinding,
+  type RunFlowWebhookReceipt,
   type RunFlowStartRequest,
   type RunFlowWorkspaceSnapshot,
 } from '../remote-contract.ts'
@@ -23,6 +25,10 @@ export interface FlowRuntimeClient {
   save(agentId: string, definition: WorkflowDefinition): Promise<WorkflowDefinition>
   remove(agentId: string, workflowId: string): Promise<boolean>
   start(agentId: string, request: RunFlowStartRequest): Promise<RunFlowStartReceipt>
+  resume(agentId: string, executionId: string, value: JsonValue): Promise<RunFlowStartReceipt>
+  webhook(agentId: string, workflowId: string): Promise<RunFlowWebhookBinding | null>
+  enableWebhook(agentId: string, workflowId: string, triggerNodeId: string): Promise<RunFlowWebhookReceipt>
+  disableWebhook(agentId: string, workflowId: string): Promise<boolean>
   execution(agentId: string, executionId: string): Promise<WorkflowExecution | null>
   cancel(agentId: string, executionId: string): Promise<boolean>
   sources(agentId: string): Promise<RunFlowPluginSource[]>
@@ -112,6 +118,10 @@ export async function connectFlowRuntime(ctx: ClientContext): Promise<() => Prom
       save: async (agentId, definition) => unwrap(await remoteCtx.remote.runflow.save(agentId, definition)),
       remove: async (agentId, workflowId) => unwrap(await remoteCtx.remote.runflow.deleteWorkflow(agentId, workflowId)),
       start: async (agentId, request) => unwrap(await remoteCtx.remote.runflow.start(agentId, request)),
+      resume: async (agentId, executionId, value) => unwrap(await remoteCtx.remote.runflow.resume(agentId, executionId, value)),
+      webhook: async (agentId, workflowId) => unwrap(await remoteCtx.remote.runflow.webhook(agentId, workflowId)),
+      enableWebhook: async (agentId, workflowId, triggerNodeId) => unwrap(await remoteCtx.remote.runflow.enableWebhook(agentId, workflowId, triggerNodeId)),
+      disableWebhook: async (agentId, workflowId) => unwrap(await remoteCtx.remote.runflow.disableWebhook(agentId, workflowId)),
       execution: async (agentId, executionId) =>
         unwrap(await remoteCtx.remote.runflow.execution(agentId, executionId)),
       cancel: async (agentId, executionId) =>

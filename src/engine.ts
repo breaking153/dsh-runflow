@@ -6,6 +6,7 @@ import type {
   JsonValue,
   NodeExecutionLogEntry,
   NodeExecutionRecord,
+  NodeControlEnvelope,
   NodeOutputEnvelope,
   WorkflowDefinition,
   WorkflowEdge,
@@ -14,8 +15,10 @@ import type {
   WorkflowNodeDefinition,
   WorkflowPortDescriptor,
   WorkflowValidationIssue,
+  WorkflowGraphCheckpoint,
 } from './contracts.ts'
 import type { ExecutionOutputWriter } from './output-store.ts'
+import { executeStateGraph, validateStateGraph } from './state-graph.ts'
 
 export class WorkflowValidationError extends Error {
   constructor(readonly issues: WorkflowValidationIssue[]) {
@@ -71,11 +74,18 @@ export function validateWorkflow(
     if (!ids.has(edge.to)) {
       issues.push({ code: 'MISSING_NODE', message: 'Edge target does not exist: ' + edge.to, nodeId: edge.to })
     }
-    if (edge.from === edge.to) {
+    if (edge.from === edge.to && definition.execution?.mode !== 'state-graph') {
       issues.push({ code: 'SELF_EDGE', message: 'Node cannot connect to itself: ' + edge.from, nodeId: edge.from })
     }
   }
   if (issues.length > 0) return issues
+
+  if (definition.execution !== undefined && !['dag', 'state-graph'].includes(definition.execution.mode)) {
+    return [{ code: 'INVALID_EXECUTION', message: 'Unknown workflow execution mode' }]
+  }
+  if (definition.execution?.mode !== 'state-graph' && definition.nodes.some(node => node.type.startsWith('control.') || node.type.startsWith('state.'))) {
+    return [{ code: 'INVALID_EXECUTION', message: 'Control and state nodes require state-graph execution mode' }]
+  }
 
   if (resolveNode !== undefined) {
     const incomingCounts = new Map<string, number>()
@@ -117,7 +127,7 @@ export function validateWorkflow(
         const key = edge.to + ':' + target.id
         const count = (incomingCounts.get(key) ?? 0) + 1
         incomingCounts.set(key, count)
-        if (count > 1 && target.multiple !== true) {
+        if (count > 1 && target.multiple !== true && definition.execution?.mode !== 'state-graph') {
           issues.push({
             code: 'PORT_CARDINALITY',
             message: 'Input port ' + edge.to + '.' + target.id + ' accepts only one connection',
@@ -128,6 +138,8 @@ export function validateWorkflow(
     }
     if (issues.length > 0) return issues
   }
+
+  if (definition.execution?.mode === 'state-graph') return validateStateGraph(definition)
 
   const incoming = new Map(definition.nodes.map(node => [node.id, 0]))
   const outgoing = new Map(definition.nodes.map(node => [node.id, [] as string[]]))
@@ -159,6 +171,9 @@ export interface WorkflowEngineOptions {
   resolveNode(type: string): WorkflowNodeDefinition | undefined
   createOutput?(execution: WorkflowExecution): Promise<ExecutionOutputWriter | undefined> | ExecutionOutputWriter | undefined
   onUpdate?(execution: WorkflowExecution): void
+  onCheckpoint?(checkpoint: WorkflowGraphCheckpoint, execution: WorkflowExecution): Promise<void> | void
+  /** Observe actual provider work so Host disposal can drain abort cleanup. */
+  onNodeTask?(task: Promise<unknown>): void
 }
 
 const clone = <T>(value: T): T => structuredClone(value)
@@ -178,6 +193,8 @@ function edgeActive(
   primaryOutputs: Map<string, JsonValue>,
   portOutputs: Map<string, JsonObject>,
 ): boolean {
+  if (!primaryOutputs.has(edge.from)) return false
+  if (edge.sourcePort !== undefined && !Object.hasOwn(portOutputs.get(edge.from) ?? {}, edge.sourcePort)) return false
   if (edge.condition === undefined) return true
   const matchedPort = portOutputs.get(edge.from)?.['matched']
   if (typeof matchedPort === 'boolean') return matchedPort === edge.condition
@@ -196,7 +213,9 @@ function sourcePortValue(
   const sourceNode = definition.nodes.find(node => node.id === edge.from)
   const provider = sourceNode === undefined ? undefined : resolveNode(sourceNode.type)
   const portId = edge.sourcePort ?? outputPorts(provider)[0]?.id ?? 'output'
-  return portOutputs.get(edge.from)?.[portId] ?? primaryOutputs.get(edge.from) ?? null
+  const ports = portOutputs.get(edge.from)
+  if (ports !== undefined && Object.hasOwn(ports, portId)) return ports[portId] ?? null
+  return edge.sourcePort === undefined ? primaryOutputs.get(edge.from) ?? null : null
 }
 
 function nodeInputs(
@@ -238,16 +257,19 @@ function nodeInputs(
   }
 }
 
-function isOutputEnvelope(value: JsonValue | NodeOutputEnvelope): value is NodeOutputEnvelope {
+function isOutputEnvelope(value: JsonValue | NodeOutputEnvelope | NodeControlEnvelope): value is NodeOutputEnvelope {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     && value.$runflow === 'port-outputs'
     && typeof value.outputs === 'object' && value.outputs !== null && !Array.isArray(value.outputs)
 }
 
 function normalizeOutput(
-  value: JsonValue | NodeOutputEnvelope,
+  value: JsonValue | NodeOutputEnvelope | NodeControlEnvelope,
   provider: WorkflowNodeDefinition,
 ): { output: JsonValue; ports: JsonObject } {
+  if (typeof value === 'object' && value !== null && !Array.isArray(value) && value.$runflow === 'control') {
+    throw new WorkflowExecutionError('Control output requires state-graph execution mode', 'FLOW_MODE_REQUIRED')
+  }
   if (isOutputEnvelope(value)) {
     const ports = clone(value.outputs)
     const values = Object.values(ports)
@@ -257,7 +279,7 @@ function normalizeOutput(
     }
   }
   const portId = outputPorts(provider)[0]?.id ?? 'output'
-  return { output: clone(value), ports: { [portId]: clone(value) } }
+  return { output: clone(value as JsonValue), ports: { [portId]: clone(value as JsonValue) } }
 }
 
 function terminalOutput(
@@ -332,6 +354,7 @@ export async function executeWorkflow(
   options: ExecuteWorkflowOptions,
   engine: WorkflowEngineOptions,
 ): Promise<WorkflowExecution> {
+  if (definition.execution?.mode === 'state-graph') return executeStateGraph(definition, options, engine)
   // Freeze provider identities before validation. Hot reload may replace the
   // registry while this workflow is running, but every node in this execution
   // must observe one coherent provider generation.
@@ -342,6 +365,25 @@ export async function executeWorkflow(
   const resolveNode = (type: string): WorkflowNodeDefinition | undefined => providerSnapshot.get(type)
   const issues = validateWorkflow(definition, resolveNode)
   if (issues.length > 0) throw new WorkflowValidationError(issues)
+
+  definition = { ...definition, edges: definition.edges.map(edge => {
+    const source = definition.nodes.find(node => node.id === edge.from)
+    const sourcePort = edge.sourcePort ?? outputPorts(source === undefined ? undefined : resolveNode(source.type))[0]?.id
+    return { ...edge, ...(sourcePort === undefined ? {} : { sourcePort }) }
+  }) }
+  const selectedEntries = options.entryNodeIds === undefined ? undefined : new Set(options.entryNodeIds)
+  if (selectedEntries !== undefined && (selectedEntries.size === 0 || [...selectedEntries].some(id => !definition.nodes.some(node => node.id === id)))) {
+    throw new WorkflowExecutionError('Invalid workflow entry node', 'FLOW_ENTRY_INVALID')
+  }
+  const reachable = new Set(selectedEntries)
+  if (selectedEntries !== undefined) {
+    const queue = [...selectedEntries]
+    for (let index = 0; index < queue.length; index += 1) {
+      for (const edge of definition.edges.filter(edge => edge.from === queue[index])) {
+        if (!reachable.has(edge.to)) { reachable.add(edge.to); queue.push(edge.to) }
+      }
+    }
+  }
 
   const controller = new AbortController()
   const parentSignal = options.signal
@@ -398,9 +440,9 @@ export async function executeWorkflow(
         await Promise.all(batch.map(async (node) => {
           const record = records.get(node.id)!
           const incoming = incomingFor(node.id, definition.edges)
-          const hasActiveInput = incoming.length === 0
+          const hasActiveInput = selectedEntries?.has(node.id) === true || incoming.length === 0
             || incoming.some(edge => edgeActive(edge, primaryOutputs, portOutputs))
-          if (node.disabled || !hasActiveInput) {
+          if (node.disabled || !hasActiveInput || selectedEntries !== undefined && !reachable.has(node.id)) {
             record.status = 'SKIPPED'
             record.finishedAt = new Date().toISOString()
             completed.add(node.id)

@@ -12,7 +12,7 @@ DSH users who ask an AI Agent to assemble executable workflows, then inspect, ad
 
 ## Product Purpose
 
-DSH RunFlow turns DSH Agent, tool, script, and Cordis node capabilities into persistent visual DAG workflows. AI authors the first useful draft; the user remains the final reviewer and can make focused visual or parameter edits before execution.
+DSH RunFlow turns DSH Agent, tool, script, and Cordis node capabilities into persistent visual DAGs and optional state graphs with bounded loops, shared state, and explicit pause/resume. AI authors the first useful draft; the user remains the final reviewer and can make focused visual or parameter edits before execution.
 
 ## Positioning
 
@@ -23,6 +23,8 @@ RunFlow is not a standalone browser automation server. It is a DSH-native workfl
 - RunFlow opens from the DSH sidebar and defaults to a maximized workspace.
 - Users manage multiple workflows, inspect execution history, edit typed node connections, and debug node outputs and artifacts.
 - Creation-mode Agents can create and test temporary workflows, Node providers, and Script providers before their files are finalized.
+- Normal live Agents can inspect and run existing workflows through the plugin-owned `runflow` tool. Authoring remains confined to the configured creation preset.
+- Authenticated webhooks use the existing Host web service and an explicitly enabled live Agent binding; external JSON input cannot select execution authority.
 - Workflow data and run outputs live under `~/.dsh_agent_workflow`, outside the DSH project directory.
 
 ## Capabilities and Constraints
@@ -32,7 +34,10 @@ RunFlow is not a standalone browser automation server. It is a DSH-native workfl
 - Saved workflows are durable files and autosave after meaningful edits; there is no publish lifecycle.
 - The frontend follows the active DSH Chinese or English locale.
 - Frontend v2 must depend on a versioned Host gateway so backend v2 can replace the transport without restructuring UI features.
-- Backend v2 may break existing development formats; no migration layer is required.
+- Definitions without execution settings remain legacy DAGs. State graphs opt in through `execution.mode`; this extension requires no migration of current v2 files. Earlier development formats still have no migration layer.
+- State graphs use JSON state, fixed reducers, bounded steps, and explicit checkpoints. They do not claim LangGraph API compatibility, arbitrary crash recovery, or exactly-once side effects.
+- Runtime tools, skills, and webhook routes follow plugin lifecycle and recheck availability. Disabling the plugin does not delete user-maintained skill files.
+- Webhook bindings expire with the Host/plugin or live owner. There is no durable delivery queue, retry, or deduplication guarantee.
 
 ## Brand Commitments
 

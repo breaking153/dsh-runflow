@@ -13,15 +13,18 @@ export function latestExecutionFor(workflowId: string, executions: WorkflowExecu
 }
 
 export function workflowTriggerSummary(workflow: WorkflowDefinition, language: RunFlowLanguage = 'zh'): WorkflowTriggerSummary {
-  const trigger = workflow.nodes.find(node => node.type.startsWith('trigger.'))
+  const triggers = workflow.nodes.filter(node => node.type.startsWith('trigger.'))
+  if (triggers.length > 1) return { label: `${triggers.length} ${language === 'zh' ? '个触发入口' : 'trigger entries'}`, detail: triggers.map(node => node.name ?? node.type.replace('trigger.', '')).join(' · ') }
+  const trigger = triggers[0]
   if (trigger === undefined) return { label: 'No trigger', detail: language === 'zh' ? '尚未配置触发器' : 'Trigger not configured' }
+  if (trigger.type === 'trigger.agent') return { label: trigger.name ?? 'Agent input', detail: language === 'zh' ? '由 AI Agent 工具触发' : 'Triggered by an AI Agent tool' }
   if (trigger.type === 'trigger.manual') return { label: trigger.name ?? 'Manual', detail: language === 'zh' ? '按需手动执行' : 'Run on demand' }
   if (trigger.type === 'trigger.schedule') {
     const cron = typeof trigger.config['cron'] === 'string' ? trigger.config['cron'] : language === 'zh' ? '未配置计划' : 'Schedule not configured'
     return { label: trigger.name ?? 'Schedule', detail: cron }
   }
   if (trigger.type === 'trigger.webhook') {
-    const path = typeof trigger.config['path'] === 'string' ? trigger.config['path'] : language === 'zh' ? '未配置路径' : 'Path not configured'
+    const path = language === 'zh' ? '在节点面板管理绑定' : 'Manage binding in the node panel'
     return { label: trigger.name ?? 'Webhook', detail: path }
   }
   if (trigger.type === 'trigger.dsh-event') {
@@ -32,7 +35,8 @@ export function workflowTriggerSummary(workflow: WorkflowDefinition, language: R
 }
 
 export function executionStatusLabel(status?: WorkflowExecution['status'], language: RunFlowLanguage = 'zh'): string {
-  if (language === 'en') return status === 'SUCCESS' ? 'Success' : status === 'FAILED' ? 'Failed' : status === 'RUNNING' ? 'Running' : status === 'PENDING' ? 'Queued' : status === 'CANCELLED' ? 'Cancelled' : 'Not run'
+  if (language === 'en') return status === 'PAUSED' ? 'Paused' : status === 'SUCCESS' ? 'Success' : status === 'FAILED' ? 'Failed' : status === 'RUNNING' ? 'Running' : status === 'PENDING' ? 'Queued' : status === 'CANCELLED' ? 'Cancelled' : 'Not run'
+  if (status === 'PAUSED') return '已暂停'
   if (status === 'SUCCESS') return '成功'
   if (status === 'FAILED') return '失败'
   if (status === 'RUNNING') return '执行中'

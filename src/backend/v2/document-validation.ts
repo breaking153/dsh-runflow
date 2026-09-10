@@ -10,6 +10,8 @@ const number: Check = value => typeof value === 'number' && Number.isFinite(valu
 const boolean: Check = value => typeof value === 'boolean'
 const optional = (check: Check): Check => value => value === undefined || check(value)
 const array = (check: Check): Check => value => Array.isArray(value) && value.every(check)
+const values = (check: Check): Check => value => record(value) && Object.values(value).every(check)
+const nonnegative: Check = value => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 const oneOf = (...values: string[]): Check => value => typeof value === 'string' && values.includes(value)
 const shape = (fields: Record<string, Check>): Check => value =>
   record(value) && Object.entries(fields).every(([key, check]) => check(value[key]))
@@ -48,6 +50,11 @@ const ui = shape({
 const workflow = shape({
   id: identifier, name: text, version: number, nodes: array(node), edges: array(edge),
   outputDir: optional(text), createdAt: optional(text), updatedAt: optional(text), ui: optional(ui),
+  execution: optional(shape({
+    mode: oneOf('dag', 'state-graph'), entryNodeIds: optional(array(identifier)),
+    maxSteps: optional(value => nonnegative(value) && (value as number) > 0),
+    initialState: optional(record), reducers: optional(values(oneOf('replace', 'append', 'sum', 'merge'))),
+  })),
 })
 
 const artifact = shape({
@@ -57,16 +64,32 @@ const artifact = shape({
 })
 const log = shape({ timestamp: text, level: oneOf('debug', 'info', 'warn', 'error'), message: text })
 const nodeExecution = shape({
-  nodeId: identifier, status: oneOf('WAITING', 'RUNNING', 'SUCCESS', 'FAILED', 'SKIPPED', 'CANCELLED'),
+  nodeId: identifier, status: oneOf('WAITING', 'RUNNING', 'PAUSED', 'SUCCESS', 'FAILED', 'SKIPPED', 'CANCELLED'),
+  step: optional(nonnegative), iteration: optional(nonnegative),
   attempts: number, inputPorts: optional(record), outputPorts: optional(record), error: optional(text),
   logs: optional(array(log)), artifacts: optional(array(artifact)),
   startedAt: optional(text), finishedAt: optional(text), durationMs: optional(number),
 })
+const stepRecord = shape({ step: nonnegative, nodes: array(nodeExecution), state: record })
+const activation = shape({
+  nodeId: identifier, edgeIndex: optional(nonnegative), from: optional(text),
+  sourcePort: optional(text), targetPort: optional(text), value: value => value !== undefined,
+})
+const checkpoint = shape({
+  schemaVersion: value => value === 1, workflowId: identifier, workflowVersion: nonnegative,
+  executionId: identifier, step: nonnegative, state: record, pending: array(activation),
+  joins: values(array(activation)), iterations: values(nonnegative), nodes: array(nodeExecution),
+  steps: array(stepRecord), lastOutputs: record, lastPortOutputs: values(record), interrupts: record,
+  startedAt: optional(text),
+})
 const execution = shape({
   id: identifier, workflowId: identifier, version: number,
-  status: oneOf('PENDING', 'RUNNING', 'SUCCESS', 'FAILED', 'CANCELLED'), trigger: text,
+  status: oneOf('PENDING', 'RUNNING', 'PAUSED', 'SUCCESS', 'FAILED', 'CANCELLED'), trigger: text,
   nodes: array(nodeExecution), outputDir: optional(text), error: optional(text),
   startedAt: optional(text), finishedAt: optional(text), artifacts: optional(array(artifact)),
+  ownerAgentId: optional(identifier), definition: optional(workflow),
+  state: optional(record), step: optional(nonnegative), steps: optional(array(stepRecord)),
+  checkpoint: optional(checkpoint),
 })
 
 // Disk documents are untrusted JSON. Check the fields consumers dereference while

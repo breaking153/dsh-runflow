@@ -12,9 +12,10 @@ import type {
 
 const JSON_MEDIA_TYPE = 'application/json'
 
-function safeSegment(value: string): string {
+export function safeOutputSegment(value: string): string {
   const normalized = value.trim().replaceAll(/[^a-zA-Z0-9._-]+/g, '-').replaceAll(/^-+|-+$/g, '')
-  return normalized.slice(0, 96) || 'item'
+  const segment = normalized.slice(0, 96)
+  return segment === '.' || segment === '..' ? 'item' : segment || 'item'
 }
 
 function previewOf(value: JsonValue, maxLength = 240): string {
@@ -35,8 +36,8 @@ export interface ExecutionOutputWriter {
   readonly outputDir: string
   readonly intermediateRoot: string
   initialize(): Promise<void>
-  writeNodeInput(nodeId: string, input: JsonValue, inputPorts: JsonObject): Promise<ExecutionArtifact[]>
-  writeIntermediate(nodeId: string, label: string, value: JsonValue, portId?: string): Promise<ExecutionArtifact>
+  writeNodeInput(nodeId: string, input: JsonValue, inputPorts: JsonObject, visit?: { step: number; iteration: number }): Promise<ExecutionArtifact[]>
+  writeIntermediate(nodeId: string, label: string, value: JsonValue, portId?: string, visit?: { step: number; iteration: number }): Promise<ExecutionArtifact>
   writeNodeRecord(record: NodeExecutionRecord): Promise<ExecutionArtifact[]>
   finalize(execution: WorkflowExecution): Promise<ExecutionArtifact[]>
 }
@@ -60,10 +61,12 @@ export class FileExecutionOutput implements ExecutionOutputWriter {
     baseDir: string,
     private readonly workflow: WorkflowDefinition,
     private readonly execution: WorkflowExecution,
+    existingDirectory?: string,
   ) {
     const stamp = (execution.startedAt ?? new Date().toISOString()).replaceAll(/[:.]/g, '-')
-    this.outputDir = join(resolve(baseDir), safeSegment(workflow.id), stamp + '-' + safeSegment(execution.id))
+    this.outputDir = existingDirectory ?? join(resolve(baseDir), safeOutputSegment(workflow.id), stamp + '-' + safeOutputSegment(execution.id))
     this.intermediateRoot = join(this.outputDir, 'intermediate')
+    this.artifacts.push(...(execution.artifacts ?? []))
   }
 
   async initialize(): Promise<void> {
@@ -83,8 +86,13 @@ export class FileExecutionOutput implements ExecutionOutputWriter {
     })
   }
 
-  async writeNodeInput(nodeId: string, input: JsonValue, inputPorts: JsonObject): Promise<ExecutionArtifact[]> {
-    const nodeDir = join(this.outputDir, 'nodes', safeSegment(nodeId))
+  private nodeDirectory(nodeId: string, visit?: { step: number; iteration: number }): string {
+    const root = join(this.outputDir, 'nodes', safeOutputSegment(nodeId))
+    return visit === undefined ? root : join(root, 'steps', String(visit.step) + '-' + String(visit.iteration))
+  }
+
+  async writeNodeInput(nodeId: string, input: JsonValue, inputPorts: JsonObject, visit?: { step: number; iteration: number }): Promise<ExecutionArtifact[]> {
+    const nodeDir = this.nodeDirectory(nodeId, visit)
     const inputPath = join(nodeDir, 'input.json')
     const portsPath = join(nodeDir, 'input-ports.json')
     const [inputBytes, portsBytes] = await Promise.all([
@@ -115,13 +123,14 @@ export class FileExecutionOutput implements ExecutionOutputWriter {
     return written
   }
 
-  async writeIntermediate(nodeId: string, label: string, value: JsonValue, portId?: string): Promise<ExecutionArtifact> {
+  async writeIntermediate(nodeId: string, label: string, value: JsonValue, portId?: string, visit?: { step: number; iteration: number }): Promise<ExecutionArtifact> {
     const next = (this.sequence.get(nodeId) ?? 0) + 1
     this.sequence.set(nodeId, next)
     const path = join(
       this.intermediateRoot,
-      safeSegment(nodeId),
-      String(next).padStart(3, '0') + '-' + safeSegment(label) + '.json',
+      safeOutputSegment(nodeId),
+      ...(visit === undefined ? [] : [String(visit.step) + '-' + String(visit.iteration)]),
+      String(next).padStart(3, '0') + '-' + safeOutputSegment(label) + '.json',
     )
     const bytes = await writeJson(path, value)
     const artifact: ExecutionArtifact = {
@@ -139,7 +148,7 @@ export class FileExecutionOutput implements ExecutionOutputWriter {
   }
 
   async writeNodeRecord(record: NodeExecutionRecord): Promise<ExecutionArtifact[]> {
-    const nodeDir = join(this.outputDir, 'nodes', safeSegment(record.nodeId))
+    const nodeDir = this.nodeDirectory(record.nodeId, record.step === undefined ? undefined : { step: record.step, iteration: record.iteration ?? 1 })
     const written: ExecutionArtifact[] = []
     if (record.output !== undefined) {
       const path = join(nodeDir, 'output.json')
@@ -193,6 +202,8 @@ export class FileExecutionOutput implements ExecutionOutputWriter {
   }
 
   async finalize(execution: WorkflowExecution): Promise<ExecutionArtifact[]> {
+    const unique = [...new Map(this.artifacts.map(artifact => [artifact.path, artifact])).values()]
+    this.artifacts.splice(0, this.artifacts.length, ...unique)
     const path = join(this.outputDir, 'execution.json')
     const snapshot: WorkflowExecution = {
       ...execution,

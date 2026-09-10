@@ -35,6 +35,7 @@ import {
   FileWorkflowRepository,
 } from './backend/v2/file-repositories.ts'
 import { createDshAgentNodeExecutor } from './backend/v2/dsh-agent-node.ts'
+import { RunFlowWebhooks } from './webhook-ingress.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -54,6 +55,7 @@ function workflowContent(definition: WorkflowDefinition): string {
     edges: definition.edges,
     outputDir: definition.outputDir ?? null,
     ui: definition.ui ?? null,
+    execution: definition.execution ?? null,
   })
 }
 
@@ -61,6 +63,12 @@ export class FlowService extends Service {
   private readonly workflowRepository: FileWorkflowRepository
   private readonly executionRepository: FileExecutionRepository
   private readonly cancellations = new Map<string, AbortController>()
+  private readonly tasks = new Set<Promise<WorkflowExecution>>()
+  private readonly providerTasks = new Set<Promise<unknown>>()
+  private available = true
+  private webhookAvailable = false
+  readonly authoringPresetId: string
+  readonly webhooks: RunFlowWebhooks
   private readonly maxParallelNodes: number
   private readonly defaultTimeoutMs: number
   private readonly defaultOutputDir: string
@@ -75,6 +83,8 @@ export class FlowService extends Service {
     this.defaultTimeoutMs = config.defaultTimeoutMs ?? 30_000
     this.defaultOutputDir = runtimePaths.outputDir
     this.watchFiles = config.watchFiles ?? true
+    this.authoringPresetId = config.authoringPresetId ?? 'cordis'
+    this.webhooks = new RunFlowWebhooks(ctx, this, config.apiPrefix)
     const warn = (message: string): void => this.ctx.logger.warn(message)
     this.workflowRepository = new FileWorkflowRepository(runtimePaths.workflowsDir, warn)
     this.executionRepository = new FileExecutionRepository(runtimePaths.executionsDir, warn)
@@ -92,6 +102,33 @@ export class FlowService extends Service {
       () => this.workflowRepository.watch(),
       'dsh-runflow: workflow repository watcher',
     )
+    this.ctx.effect(() => async () => {
+      this.available = false
+      this.webhookAvailable = false
+      for (const controller of this.cancellations.values()) controller.abort('RunFlow plugin unloaded')
+      await Promise.allSettled([...this.tasks])
+      await Promise.allSettled([...this.providerTasks])
+    }, 'dsh-runflow: stop and drain active executions')
+  }
+
+  isAvailable(): boolean { return this.available }
+  activeExecutionCount(): number { return this.cancellations.size }
+
+  triggerCapabilities(): { manual: boolean; agent: boolean; webhook: boolean } {
+    return { manual: this.available, agent: this.available, webhook: this.available && this.webhookAvailable }
+  }
+
+  setWebhookAvailable(available: boolean): void { this.webhookAvailable = available }
+
+  private resolveNode(type: string): WorkflowNodeDefinition | undefined {
+    const definition = this.nodeLibrary.resolve(type)
+    return definition !== undefined && type === 'trigger.webhook'
+      ? { ...definition, available: this.triggerCapabilities().webhook }
+      : definition
+  }
+
+  private assertAvailable(): void {
+    if (!this.available) throw new Error('RunFlow plugin is unavailable')
   }
 
   registerNode(definition: WorkflowNodeDefinition): () => void {
@@ -101,7 +138,9 @@ export class FlowService extends Service {
   }
 
   listNodes(): WorkflowNodeDescriptor[] {
-    return this.nodeLibrary.list().map(entry => clone(entry.descriptor))
+    return this.nodeLibrary.list().map(entry => entry.descriptor.type === 'trigger.webhook'
+      ? { ...clone(entry.descriptor), available: this.triggerCapabilities().webhook }
+      : clone(entry.descriptor))
   }
 
   listNodeLibrary(): NodeLibraryEntry[] {
@@ -229,7 +268,8 @@ export class FlowService extends Service {
   }
 
   saveWorkflow(input: WorkflowDefinition): WorkflowDefinition {
-    const issues = validateWorkflow(input, type => this.nodeLibrary.resolve(type))
+    this.assertAvailable()
+    const issues = validateWorkflow(input, type => this.resolveNode(type))
     if (issues.length > 0) throw new WorkflowValidationError(issues)
     const current = this.workflowRepository.get(input.id)
     const now = new Date().toISOString()
@@ -291,16 +331,53 @@ export class FlowService extends Service {
     return await this.runDefinition(this.requireWorkflow(id), options)
   }
 
+  start(id: string, options: ExecuteWorkflowOptions = {}): WorkflowExecution {
+    return this.startDefinition(this.requireWorkflow(id), options)
+  }
+
+  executionOwnedBy(id: string, agentId: string): boolean {
+    return this.executionRepository.get(id)?.ownerAgentId === agentId
+  }
+
+  resume(id: string, value: JsonValue, options: { agentId: string; signal?: AbortSignal }): WorkflowExecution {
+    this.assertAvailable()
+    if (!this.executionOwnedBy(id, options.agentId)) throw new Error('RunFlow execution is not owned by this Agent')
+    if (this.cancellations.has(id)) throw new Error('RunFlow execution is already running')
+    const saved = this.executionRepository.get(id)!
+    if (saved.status !== 'PAUSED' || saved.checkpoint === undefined || saved.definition === undefined) {
+      throw new Error('RunFlow execution has no paused checkpoint')
+    }
+    const interrupts = Object.keys(saved.checkpoint.interrupts)
+    if (interrupts.length === 0) throw new Error('RunFlow execution has no paused node')
+    // One response resumes every node paused at this barrier. For different
+    // responses, callers can supply an object keyed by interrupted node ID.
+    const objectResponse = typeof value === 'object' && value !== null && !Array.isArray(value)
+    const byNode = objectResponse && interrupts.every(nodeId => Object.hasOwn(value, nodeId))
+    if (objectResponse && !byNode && interrupts.some(nodeId => Object.hasOwn(value, nodeId))) {
+      throw new Error('Resume responses must include every paused node ID')
+    }
+    const resumeValues = Object.fromEntries(interrupts.map(nodeId => [nodeId,
+      byNode ? (value as JsonObject)[nodeId]! : clone(value),
+    ])) as JsonObject
+    return this.startDefinition(saved.definition, {
+      ...options, executionId: id, checkpoint: saved.checkpoint, resumeValues,
+      trigger: saved.trigger,
+      ...(saved.input === undefined ? {} : { input: saved.input }),
+    })
+  }
+
   /**
    * Start a validated definition without persisting it in the shared workflow
    * registry. The first RUNNING snapshot is published synchronously so Remote
    * callers can poll and cancel by id while the run continues in the Host.
    */
   startDefinition(definition: WorkflowDefinition, options: ExecuteWorkflowOptions = {}): WorkflowExecution {
+    this.assertAvailable()
     const detached = clone(definition)
-    const issues = validateWorkflow(detached, type => this.nodeLibrary.resolve(type))
+    const issues = validateWorkflow(detached, type => this.resolveNode(type))
     if (issues.length > 0) throw new WorkflowValidationError(issues)
-    const executionId = randomUUID()
+    const executionId = options.executionId ?? randomUUID()
+    if (this.cancellations.has(executionId)) throw new Error('RunFlow execution is already running')
     const task = this.runDefinition(detached, { ...options, executionId })
     void task.catch(error => {
       this.ctx.logger.error('RunFlow execution %s rejected: %s', executionId, errorMessage(error))
@@ -314,17 +391,36 @@ export class FlowService extends Service {
 
   cancel(executionId: string): boolean {
     const controller = this.cancellations.get(executionId)
-    if (controller === undefined) return false
+    if (controller === undefined) {
+      const execution = this.executionRepository.get(executionId)
+      if (execution?.status !== 'PAUSED') return false
+      execution.status = 'CANCELLED'
+      execution.finishedAt = new Date().toISOString()
+      for (const node of execution.nodes) {
+        if (node.status === 'PAUSED' || node.status === 'WAITING') node.status = 'CANCELLED'
+      }
+      this.executionRepository.save(execution)
+      return true
+    }
     controller.abort('Cancelled by user')
     return true
   }
 
   listExecutions(workflowId?: string, limit = 50): WorkflowExecution[] {
-    return this.executionRepository.list(workflowId, limit)
+    return this.executionRepository.list(workflowId, limit).map(execution => this.liveProjection(execution))
   }
 
   execution(id: string): WorkflowExecution | undefined {
-    return this.executionRepository.get(id)
+    const execution = this.executionRepository.get(id)
+    return execution === undefined ? undefined : this.liveProjection(execution)
+  }
+
+  private liveProjection(execution: WorkflowExecution): WorkflowExecution {
+    // A checkpoint can be durable before output finalization has drained. Do
+    // not advertise a resumable pause while that same execution is still live.
+    return this.cancellations.has(execution.id) && execution.status !== 'RUNNING'
+      ? { ...execution, status: 'RUNNING' }
+      : execution
   }
 
   private requireWorkflow(id: string): WorkflowDefinition {
@@ -337,28 +433,70 @@ export class FlowService extends Service {
     workflow: WorkflowDefinition,
     options: ExecuteWorkflowOptions,
   ): Promise<WorkflowExecution> {
+    this.assertAvailable()
+    const executionId = options.executionId ?? randomUUID()
+    if (this.cancellations.has(executionId)) throw new Error('RunFlow execution is already running')
     const cancellation = new AbortController()
+    this.cancellations.set(executionId, cancellation)
     const relay = (): void => cancellation.abort(options.signal?.reason)
     options.signal?.addEventListener('abort', relay, { once: true })
     if (options.signal?.aborted) relay()
     const outputBase = resolve(options.outputDir ?? workflow.outputDir ?? this.defaultOutputDir)
+    const previous = options.checkpoint === undefined ? undefined : this.executionRepository.get(executionId)
+    let task: Promise<WorkflowExecution> | undefined
     try {
-      return await executeWorkflow(workflow, { ...options, signal: cancellation.signal }, {
+      const entryNodeIds = this.entryNodes(workflow, options)
+      const persist = (snapshot: WorkflowExecution): void => {
+        this.executionRepository.save({
+          ...snapshot, definition: clone(workflow),
+          ...(options.agentId === undefined ? {} : { ownerAgentId: options.agentId }),
+        })
+      }
+      task = executeWorkflow(workflow, {
+        ...options, executionId, signal: cancellation.signal,
+        ...(entryNodeIds === undefined ? {} : { entryNodeIds }),
+      }, {
         maxParallelNodes: this.maxParallelNodes,
         defaultTimeoutMs: this.defaultTimeoutMs,
-        resolveNode: type => this.nodeLibrary.resolve(type),
-        createOutput: execution => new FileExecutionOutput(outputBase, workflow, execution),
-        onUpdate: snapshot => {
-          this.executionRepository.save(snapshot)
-          this.cancellations.set(snapshot.id, cancellation)
+        resolveNode: type => this.resolveNode(type),
+        createOutput: execution => new FileExecutionOutput(outputBase, workflow, {
+          ...execution,
+          ...(previous?.artifacts === undefined ? {} : { artifacts: previous.artifacts }),
+        }, previous?.outputDir),
+        onUpdate: persist,
+        onCheckpoint: (checkpoint, execution) => persist({ ...execution, checkpoint }),
+        onNodeTask: task => {
+          this.providerTasks.add(task)
+          void task.then(() => this.providerTasks.delete(task), () => this.providerTasks.delete(task))
         },
       })
+      this.tasks.add(task)
+      const execution = await task
+      return this.executionRepository.get(execution.id) ?? execution
     } finally {
+      if (task !== undefined) this.tasks.delete(task)
       options.signal?.removeEventListener('abort', relay)
       for (const [id, controller] of this.cancellations) {
         if (controller === cancellation) this.cancellations.delete(id)
       }
     }
+  }
+
+  private entryNodes(workflow: WorkflowDefinition, options: ExecuteWorkflowOptions): string[] | undefined {
+    if (options.checkpoint !== undefined) return undefined
+    if (options.entryNodeIds !== undefined) return options.entryNodeIds
+    const trigger = options.trigger ?? 'manual'
+    const type = trigger === 'agent' ? 'trigger.agent' : trigger === 'webhook' ? 'trigger.webhook' : 'trigger.manual'
+    const triggers = workflow.nodes.filter(node => node.type.startsWith('trigger.') && !node.disabled)
+    if (triggers.length === 0) return undefined
+    let matching = triggers.filter(node => node.type === type).map(node => node.id)
+    // Existing manually runnable definitions remain callable by normal Agents.
+    // An explicit Agent entry takes precedence when the graph declares one.
+    if (matching.length === 0 && type === 'trigger.agent') {
+      matching = triggers.filter(node => node.type === 'trigger.manual').map(node => node.id)
+    }
+    if (matching.length === 0) throw new Error('Workflow has no entry for trigger: ' + trigger)
+    return matching
   }
 
   private async executeProgramNode(

@@ -33,6 +33,10 @@ function runtimeFixture(): FlowRuntimeClient {
         status: 'RUNNING' as const, trigger: 'ui', nodes: [],
       },
     })),
+    resume: vi.fn(async () => ({ executionId: 'execution-1', execution: { id: 'execution-1', workflowId: workflow.id, version: 3, status: 'RUNNING' as const, trigger: 'ui', nodes: [] } })),
+    webhook: vi.fn(async () => null),
+    enableWebhook: vi.fn(async () => ({ binding: { id: 'hook', workflowId: workflow.id, triggerNodeId: 'manual', path: '/runflow/webhooks/hook', createdAt: '2026-09-10T00:00:00Z' }, token: 'secret' })),
+    disableWebhook: vi.fn(async () => true),
     execution: vi.fn(async () => null),
     cancel: vi.fn(async () => true),
     sources: vi.fn(async () => []),
@@ -57,6 +61,14 @@ describe('RunFlow frontend gateway v2', () => {
     await expect(gateway.workflows.save(context, workflow)).resolves.toEqual(workflow)
     await expect(gateway.executions.start(context, { definition: workflow })).resolves.toEqual(expect.objectContaining({ executionId: 'execution-1' }))
 
+    await gateway.executions.resume(context, 'execution-1', { approved: true })
+    await gateway.webhooks.read(context, workflow.id)
+    await gateway.webhooks.enable(context, workflow.id, 'manual')
+    await gateway.webhooks.disable(context, workflow.id)
+    expect(runtime.resume).toHaveBeenCalledWith('agent-review', 'execution-1', { approved: true })
+    expect(runtime.webhook).toHaveBeenCalledWith('agent-review', workflow.id)
+    expect(runtime.enableWebhook).toHaveBeenCalledWith('agent-review', workflow.id, 'manual')
+    expect(runtime.disableWebhook).toHaveBeenCalledWith('agent-review', workflow.id)
     expect(runtime.workspace).toHaveBeenCalledWith('agent-review')
     expect(runtime.save).toHaveBeenCalledWith('agent-review', workflow)
     expect(runtime.start).toHaveBeenCalledWith('agent-review', { definition: workflow })

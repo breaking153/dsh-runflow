@@ -1,7 +1,9 @@
-import type { WorkflowDefinition, WorkflowExecution } from '../../contracts.ts'
+import type { JsonValue, WorkflowDefinition, WorkflowExecution } from '../../contracts.ts'
 import type { RunFlowPluginSource, SaveRunFlowPluginSourceRequest } from '../../plugin-sources.ts'
 import type {
   RunFlowStartReceipt,
+  RunFlowWebhookBinding,
+  RunFlowWebhookReceipt,
   RunFlowStartRequest,
   RunFlowWorkspaceSnapshot,
 } from '../../remote-contract.ts'
@@ -34,8 +36,14 @@ export interface RunFlowGatewayV2 {
     save(context: RunFlowClientContext, definition: WorkflowDefinition): Promise<WorkflowDefinition>
     delete(context: RunFlowClientContext, workflowId: string): Promise<boolean>
   }
+  webhooks: {
+    read(context: RunFlowClientContext, workflowId: string): Promise<RunFlowWebhookBinding | null>
+    enable(context: RunFlowClientContext, workflowId: string, triggerNodeId: string): Promise<RunFlowWebhookReceipt>
+    disable(context: RunFlowClientContext, workflowId: string): Promise<boolean>
+  }
   executions: {
     start(context: RunFlowClientContext, request: RunFlowStartRequest): Promise<RunFlowStartReceipt>
+    resume(context: RunFlowClientContext, executionId: string, value: JsonValue): Promise<RunFlowStartReceipt>
     read(context: RunFlowClientContext, executionId: string): Promise<WorkflowExecution | null>
     cancel(context: RunFlowClientContext, executionId: string): Promise<boolean>
   }
@@ -60,8 +68,14 @@ export function createRunFlowGatewayV2Adapter(runtime: FlowRuntimeClient): RunFl
       save: (context, definition) => runtime.save(context.agentId, definition),
       delete: (context, workflowId) => runtime.remove(context.agentId, workflowId),
     },
+    webhooks: {
+      read: (context, workflowId) => runtime.webhook(context.agentId, workflowId),
+      enable: (context, workflowId, triggerNodeId) => runtime.enableWebhook(context.agentId, workflowId, triggerNodeId),
+      disable: (context, workflowId) => runtime.disableWebhook(context.agentId, workflowId),
+    },
     executions: {
       start: (context, request) => runtime.start(context.agentId, request),
+      resume: (context, executionId, value) => runtime.resume(context.agentId, executionId, value),
       read: (context, executionId) => runtime.execution(context.agentId, executionId),
       cancel: (context, executionId) => runtime.cancel(context.agentId, executionId),
     },

@@ -6,11 +6,26 @@ import {
 } from 'lucide-react'
 import type { WorkflowNodeDescriptor } from '../contracts.ts'
 
+const controlInput = [{ id: 'input', type: 'any' as const, multiple: true }]
+const stateGraphNodes: WorkflowNodeDescriptor[] = [
+  ['control.branch', 'Branch', 'true,false', '按条件选择实际执行分支'],
+  ['control.switch', 'Switch routes', 'case1,case2,case3,case4,default', '按规则选择第一条匹配分支'],
+  ['control.parallel', 'Parallel', 'branch1,branch2,branch3,branch4', '激活多个并行分支'],
+  ['control.join', 'Join', 'output', '等待每条连入边的新消息；用于全部执行的并行分支'],
+  ['control.loop', 'Loop', 'continue,done', '有界循环与条件退出'],
+  ['state.read', 'Read state', 'output', '读取共享图状态'],
+  ['state.update', 'Update state', 'output', '通过归约器更新共享状态'],
+  ['control.end', 'End branch', 'output', '结束当前执行分支'],
+  ['control.interrupt', 'Pause for input', 'output', '暂停等待人工或 Agent 回答'],
+].map(([type, title, ports, description]) => ({ type: type!, title: title!, description: description!, category: 'logic', group: 'Core/State Graph', color: '#a78bfa', icon: 'git-branch', inputs: controlInput, outputs: ports!.split(',').map(id => ({ id, type: 'any' })), ...(type === 'control.join' ? { activation: 'all' } : {}) }))
+
 const triggerOutput = [{ id: 'output', label: 'flow', type: 'flow' as const }]
 
 export const NODE_CATALOG: WorkflowNodeDescriptor[] = [
+  ...stateGraphNodes,
+  { type: 'trigger.agent', title: 'Agent input', description: '接收 AI Agent 工具提供的输入', category: 'trigger', color: '#22c55e', icon: 'bot', inputs: [], outputs: triggerOutput },
   { type: 'trigger.manual', title: 'Manual Trigger', description: '手动启动工作流', category: 'trigger', color: '#22c55e', icon: 'mouse-pointer-click', inputs: [], outputs: triggerOutput },
-  { type: 'trigger.webhook', title: 'Webhook', description: 'Host 监听器尚未安装', category: 'trigger', color: '#22c55e', icon: 'webhook', available: false, inputs: [], outputs: triggerOutput },
+  { type: 'trigger.webhook', title: 'Webhook', description: '接收带专用令牌的 HTTP 输入；需 Host Web 服务', category: 'trigger', color: '#22c55e', icon: 'webhook', inputs: [], outputs: triggerOutput },
   { type: 'trigger.schedule', title: 'Schedule', description: 'Host Cron 监听器尚未安装', category: 'trigger', color: '#22c55e', icon: 'clock-3', available: false, inputs: [], outputs: triggerOutput },
   { type: 'trigger.dsh-event', title: 'DSH Event', description: 'Host 事件订阅器尚未安装', category: 'trigger', color: '#22c55e', icon: 'radio', available: false, inputs: [], outputs: triggerOutput },
   {

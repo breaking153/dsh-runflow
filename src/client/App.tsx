@@ -35,6 +35,7 @@ import { compatiblePortTypes, normalizeNodeConnection } from './connection-plann
 import { nodeGroupLabel } from './node-groups.ts'
 import { useResizablePanel } from './use-resizable-panel.ts'
 import { relativeTime, useRunFlowLocale } from './locale.ts'
+import { WorkflowExecutionSettings } from './WorkflowExecutionSettings.tsx'
 
 const nodeTypes: NodeTypes = { workflow: WorkflowNode, 'runflow-group': WorkflowGroupNode, 'runflow-reroute': RerouteNode, 'runflow-subflow': SubflowNode }
 type CreatorRequest = {
@@ -123,7 +124,7 @@ function ExecutionsPage({ workflowId }: { workflowId?: string }) {
     <header className="page-header"><div><p>{t('activity')}</p><h1>{t('executions')}</h1><span>{t('executionIntro')}</span></div></header>
     <div className="page-filters">
       <label className="filter-select"><Workflow size={14} /><select value={flow} onChange={event => setFlow(event.target.value)}><option value="all">{t('allWorkflows')}</option>{workflows.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
-      <label className="filter-select"><Filter size={14} /><select value={status} onChange={event => setStatus(event.target.value)}><option value="all">{t('allStatuses')}</option><option>SUCCESS</option><option>FAILED</option><option>RUNNING</option><option>CANCELLED</option></select></label>
+      <label className="filter-select"><Filter size={14} /><select value={status} onChange={event => setStatus(event.target.value)}><option value="all">{t('allStatuses')}</option><option>SUCCESS</option><option>FAILED</option><option>RUNNING</option><option>PAUSED</option><option>PENDING</option><option>CANCELLED</option></select></label>
     </div>
     <div className="execution-table">
       <div className="execution-head"><span>{t('lastExecution')}</span><span>{t('workflows')}</span><span>{t('started')}</span><span>{t('duration')}</span><span>{t('trigger')}</span></div>
@@ -260,6 +261,7 @@ export function EditorHeader({ onTemplates, onKeybindings }: { onTemplates(): vo
       <button className={'icon-text-button run-settings-toggle ' + (runSettingsOpen ? 'active' : '')} onClick={() => setRunSettingsOpen(value => !value)} aria-expanded={runSettingsOpen} aria-label={t('runSettings')}><SlidersHorizontal size={15} /><span>{t('runSettings')}</span></button>
       {runSettingsOpen && <section className="run-settings-popover" aria-label={t('runSettings')}>
         <header><strong>{t('runSettings')}</strong><button onClick={() => setRunSettingsOpen(false)} aria-label={t('close')}><X size={14} /></button></header>
+        <WorkflowExecutionSettings />
         <label><span>{t('workflowOutputDir')}</span><input value={workflowOutputDir} onChange={event => setWorkflowOutputDir(event.target.value)} placeholder="~/.dsh_agent_workflow/output" /></label>
         <label><span>{t('runInput')}</span><textarea spellCheck={false} value={runInput} onChange={event => setRunInput(event.target.value)} /></label>
       </section>}
@@ -272,6 +274,7 @@ export function EditorHeader({ onTemplates, onKeybindings }: { onTemplates(): vo
 
 function CanvasEditor() {
   const { t } = useRunFlowLocale()
+  const mode = useFlowStore(state => state.workflowExecution?.mode ?? 'dag')
   const nodes = useFlowStore(state => state.nodes)
   const edges = useFlowStore(state => state.edges)
   const onNodesChange = useFlowStore(state => state.onNodesChange)
@@ -328,7 +331,7 @@ function CanvasEditor() {
   const selectedNode = nodes.find(node => node.id === selectedNodeId)
   const showInspector = inspectorOpen && (selectedNode !== undefined || review !== undefined) && selectedCount <= 1
   const renderedEdges = useMemo(() => linksVisible ? edges : edges.map(edge => ({ ...edge, hidden: true })), [edges, linksVisible])
-  const normalizedConnection = (connection: Parameters<IsValidConnection>[0]): Connection | undefined => normalizeNodeConnection(nodes, connection)
+  const normalizedConnection = (connection: Parameters<IsValidConnection>[0]): Connection | undefined => normalizeNodeConnection(nodes, connection, { mode, edges })
   const validConnection: IsValidConnection = connection => normalizedConnection(connection) !== undefined
   const connectNodes = (connection: Connection): void => {
     const normalized = normalizedConnection(connection)

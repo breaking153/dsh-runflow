@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  Visual DAG workflow orchestration deeply integrated with DeepSeek Harness
+  Visual DAG and state-graph workflow orchestration integrated with DeepSeek Harness
 </p>
 
 <p align="center">
@@ -12,12 +12,13 @@
 
 DSH RunFlow reuses the Agent, Subagent, LLM Provider, `run_code`, scope, permission, and lifecycle systems already provided by DeepSeek Harness. Visual authoring, node development, execution, and debugging all run inside the same Host. RunFlow is not a second Agent runtime and does not bypass DSH through a standalone HTTP service.
 
-> The current release is `0.1.0` Alpha with the Host architecture upgraded to v2. Manual Trigger, branching, sorting, aggregation, JSON, wait, HTTP, JavaScript, DSH Agent, and Storage nodes execute against the real Host. Webhook, Schedule, DSH Event, and standalone LLM nodes remain explicitly disabled until their providers are implemented.
+> The current release is `0.1.0` Alpha on Host architecture v2. Existing DAGs remain compatible; optional state graphs add bounded loops, shared-state reducers, and pause/resume. Entry points include manual runs, normal Agents, and authenticated webhooks. Webhooks require the existing Host web service and a live Agent binding. Schedule, DSH Event, and standalone LLM nodes remain unimplemented. See the [state-graph and ingress guide (Chinese)](./docs/STATE_GRAPH_GUIDE.md) for configuration and limits.
 
 ## Highlights
 
 - **Native DSH execution**: `dsh.agent` starts child agents through `ctx.subagents.start()` and discovers Provider, Model, and capability data from the active Host.
-- **Visual DAG authoring**: typed named ports, multiple outputs, connection validation, multi-select, zoom, pan, compatible-node discovery, and port previews.
+- **Visual DAG and state-graph authoring**: typed named ports, multiple outputs, conditional routing, parallel joins, shared state, and bounded loops. Definitions without an execution mode keep legacy DAG behavior.
+- **Three execution entry points**: UI manual runs, the normal Agent `runflow` tool, and live Agent-authorized webhooks share the Host engine. The owning Agent can resume an explicit pause.
 - **Multiple workflows**: manage definitions, triggers, and recent runs from one sidebar; UI changes are persisted immediately.
 - **Observable runs**: inspect node status, duration, inputs, outputs, logs, errors, and artifacts through one Details UI.
 - **Node development loop**: creation-mode tools and Node Lab support authoring, real execution tests, content-hash versions, hot reload, and test-gated persistence.
@@ -91,11 +92,13 @@ The Host validates every requested capability before execution. Unsupported outp
 
 ### 5. Run, debug, and inspect results
 
-When connected to the DSH Host, **Execute workflow** calls a Typert Remote authorized for the current primary Agent. The Host returns an execution ID immediately and the UI polls that execution. There is no anonymous HTTP execution endpoint, and cross-Agent reads or cancellation are rejected.
+When connected to the DSH Host, **Execute workflow** calls a Typert Remote authorized for the current primary Agent. The Host returns an execution ID immediately and the UI polls that execution. Normal Agents can also run existing workflows with `runflow`. Webhooks use the existing Host HTTP service, a live binding, and Bearer authentication; external input cannot select the Agent, definition, or output directory. Cross-Agent execution reads, cancellation, and resume are rejected.
 
 ![Node execution Details UI](./output/playwright/host-integrated-creation-run-code.png)
 
 Node Details exposes five views: **Overview, Input, Output, Logs, and Files**. Failed nodes prioritize structured error information, while Files lists final artifacts and `intermediate/` debug output. Details can be opened from a node card, a port preview, or a node row in execution history.
+
+**Run settings** exposes the execution mode, step limit, entry nodes, initial state, and reducers. State graphs report steps and state; `PAUSED` means an explicit JSON response is required, not failure or completion. Resuming `control.interrupt` uses the same frozen workflow definition. Arbitrary `RUNNING` executions are not automatically recovered after a crash. See the [guide](./docs/STATE_GRAPH_GUIDE.md) for configuration and examples.
 
 > The standalone `pnpm dev` page is only a layout and interaction preview. Without a DSH Host it shows **Host disconnected**, disables real execution, and never synthesizes mock results.
 
@@ -148,7 +151,9 @@ For a first real run, create a workflow, connect `Manual Trigger → JavaScript 
 ```mermaid
 flowchart LR
   UI[DSH Web / RunFlow UI] -->|Typert Remote + current agentId| REMOTE[RunFlow Remote]
-  REMOTE --> FLOW[ctx.flow / DAG Engine]
+  REMOTE --> FLOW[ctx.flow / DAG + State Graph Engine]
+  AGENT[Normal Agent / runflow tool] --> FLOW
+  WEB[Host Web Server] -->|Bearer + live Agent binding| FLOW
   FLOW --> SNAPSHOT[Node Provider snapshot]
   SNAPSHOT --> NODE[Built-in and file-backed nodes]
   NODE --> SUB[ctx.subagents.start]
@@ -161,12 +166,14 @@ flowchart LR
 
 Important boundaries:
 
-- RunFlow captures a Node Provider snapshot when a workflow starts. A run keeps the same Providers even if source files change while it is active.
+- RunFlow captures a Node Provider snapshot at each start or resume. That execution segment keeps the same Providers even if source files change while it is active. Resume uses the frozen workflow definition with currently available Providers.
 - The `nodes/` and `script/` loaders use a `tsc --watch`-style single-flight queue: file events are coalesced, versions are SHA-256 content hashes, and the old Cordis fiber is disposed before the new version activates.
 - If a new version cannot import or activate, the loader attempts to restore the previous version. Later file changes continue to trigger reloads.
 - The UI Remote is scoped to the active primary Agent. Single-node debugging executes the target and all of its upstream dependencies, not a fake canvas-order subset.
 
 ## Creation mode and AI authoring
+
+While the plugin is active, normal live Agents receive the runtime `runflow` tool with `capabilities/list/get/start/get_execution/list_executions/cancel/resume`. It operates on saved workflows and grants no authoring rights. The runtime `dsh-runflow` skill guides capability discovery. Unloading unregisters the tool and skill, and cached calls recheck live service availability. User-maintained skill files are left intact.
 
 Authoring capabilities are injected only into the default `cordis` creation-mode scope. Normal conversations and other presets cannot see them:
 
@@ -249,7 +256,7 @@ Terminal results include `value`, `logs`, structured `error`, queue/execution ti
 
 ## Typed ports and multiple outputs
 
-- Supported types: `any/json/text/number/boolean/file/files/image/audio/table/error`.
+- Supported types: `any/flow/json/text/number/boolean/file/files/image/audio/table/error`. Trigger `flow` signals carry business input; state control nodes can read their payload.
 - Edges route through `sourcePort` / `targetPort`; validation checks port existence, type compatibility, and connection cardinality before execution.
 - Legacy nodes without port declarations continue to use compatible `any input/output` ports.
 - Every named output has its own preview and Details entry, which fits naturally multi-result HTTP, condition, Agent, and collection nodes.
@@ -307,12 +314,22 @@ Backend v2 no longer maintains `workspace.json` and intentionally provides no mi
 | `watchFiles` | `true` | Watch workflow, Node, and Script files |
 | `enableAuthoringTools` | `true` | Install creation-mode tools and skill |
 | `authoringPresetId` | `cordis` | Preset scope that receives authoring capabilities |
+| `enableWebhooks` | `true` | Register ingress when the existing Host `webServer` is available; each workflow still needs a live binding |
+| `apiPrefix` | `/api/runflow` | Host path prefix; bindings use `<apiPrefix>/webhooks/<binding-id>` |
+
+State-graph settings belong to the workflow's `execution` object: `mode: "state-graph"`, `entryNodeIds`, `initialState`, `reducers`, and `maxSteps` (default 100, range 1–1000). These are not plugin options. Webhook credentials and live bindings are not stored in workflow files.
 
 ## Capability status
 
 | Node | Status | Implementation |
 | --- | --- | --- |
-| `trigger.manual` | Executable | Manual Host DAG entry |
+| `trigger.manual` | Executable | Manual Host entry for DAGs and state graphs |
+| `trigger.agent` | Executable | Runtime-tool entry for the current live Agent |
+| `control.branch` / `control.switch` | State-graph executable | One conditional route, or up to four ordered rules plus a default route |
+| `control.parallel` / `control.join` | State-graph executable | Fixed parallel branches; Join awaits a fresh message on every incoming edge |
+| `control.loop` | State-graph executable | Condition and iteration bound, also subject to the graph step limit |
+| `state.read` / `state.update` | State-graph executable | Shared JSON state with replace / append / sum / merge reducers |
+| `control.interrupt` / `control.end` | State-graph executable | Persisted pause and authorized resume; finish the current branch |
 | `builtin.condition` | Executable | Conditional routing |
 | `builtin.set` | Executable | Field mapping and transformation |
 | `builtin.switch` | Executable | Named match/fallback multi-output routing |
@@ -324,7 +341,7 @@ Backend v2 no longer maintains `workspace.json` and intentionally provides no mi
 | `script.javascript` | Executable | `ctx.flowScript` → DSH `run_code` |
 | `http.request` | Executable | Host `fetch()` with method, headers, and JSON/string body |
 | `storage.write` | Executable | Persists into the execution's `intermediate/` and returns a receipt |
-| `trigger.webhook` | Not implemented | Waiting for a Host listener provider |
+| `trigger.webhook` | Conditionally available | Host web service, live Agent binding, POST JSON, and Bearer authentication |
 | `trigger.schedule` | Not implemented | Waiting for a Host scheduler provider |
 | `trigger.dsh-event` | Not implemented | Waiting for a DSH event listener provider |
 | `dsh.llm` | Not implemented | Use the fully permission-integrated `dsh.agent` for AI work |
@@ -349,8 +366,13 @@ Key directories:
 nodes/                  Node executor, drafts, persisted Providers, Host Node plugins
 script/                 Script executor, run_code channel, Host Script plugins
 src/authoring-tools.ts  Creation-mode scoped tools and skill
+src/runtime-tools.ts    Normal Agent run, inspect, cancel, and resume tools
+src/runtime-skills.ts   Plugin-owned runtime guidance
+src/webhook-ingress.ts  Authenticated ingress on the existing Host HTTP service
 src/directory-plugin-loader.ts  Content hashing and serial hot reload
 src/engine.ts           Typed-port validation, DAG, retry / timeout / cancel
+src/state-graph.ts      Step scheduling, reducers, checkpoints, and pause/resume
+examples/workflows/    Bounded loop, parallel reduction, and webhook review examples
 src/flow-service.ts     v2 application facade, execution coordination, Provider snapshot
 src/backend/v2/         Workflow/Execution repositories and DSH Agent adapter
 src/remote-service.ts   Agent-authorized start / poll / cancel Remote

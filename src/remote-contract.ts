@@ -26,6 +26,20 @@ export interface RunFlowStartReceipt {
   execution: WorkflowExecution
 }
 
+export interface RunFlowWebhookBinding {
+  id: string
+  workflowId: string
+  triggerNodeId: string
+  path: string
+  createdAt: string
+}
+
+/** The bearer token is returned once and is never part of a saved workflow. */
+export interface RunFlowWebhookReceipt {
+  binding: RunFlowWebhookBinding
+  token: string
+}
+
 export interface RunFlowWorkspaceSnapshot {
   apiVersion: 2
   workflows: WorkflowDefinition[]
@@ -39,6 +53,7 @@ export interface RunFlowWorkspaceSnapshot {
     runCode: boolean
     nodeAuthoring: boolean
     sourceAuthoring: boolean
+    triggers?: { manual: boolean; agent: boolean; webhook: boolean }
   }
 }
 
@@ -49,6 +64,10 @@ export interface RunFlowRemoteNamespace {
   start(agentId: string, request: RunFlowStartRequest): Promise<RemoteResult<RunFlowStartReceipt>>
   execution(agentId: string, executionId: string): Promise<RemoteResult<WorkflowExecution | null>>
   cancel(agentId: string, executionId: string): Promise<RemoteResult<boolean>>
+  resume(agentId: string, executionId: string, value: JsonValue): Promise<RemoteResult<RunFlowStartReceipt>>
+  webhook(agentId: string, workflowId: string): Promise<RemoteResult<RunFlowWebhookBinding | null>>
+  enableWebhook(agentId: string, workflowId: string, triggerNodeId: string): Promise<RemoteResult<RunFlowWebhookReceipt>>
+  disableWebhook(agentId: string, workflowId: string): Promise<RemoteResult<boolean>>
   sources(agentId: string): Promise<RemoteResult<RunFlowPluginSource[]>>
   saveSource(agentId: string, request: SaveRunFlowPluginSourceRequest): Promise<RemoteResult<RunFlowPluginSource>>
 }
@@ -107,6 +126,30 @@ const stringParameter = (name: string, typeSymbol: string) => ({
 export const RUNFLOW_REMOTE = {
   package: 'dsh-runflow',
   descriptors: [
+    {
+      id: 'dsh-runflow#runflow/resume', service: 'runflowRemote', namespace: 'runflow', method: 'resume',
+      invocation: { kind: 'direct' }, scope: { context: 'agent', wire: 'agentId' },
+      parameters: [agentParameter, stringParameter('executionId', 'dsh-runflow#ExecutionId'), jsonParameter('value', 'dsh-runflow#JsonValue')],
+      result: codec('dsh-runflow#RunFlowStartReceipt', jsonSchema),
+    },
+    {
+      id: 'dsh-runflow#runflow/webhook', service: 'runflowRemote', namespace: 'runflow', method: 'webhook',
+      invocation: { kind: 'direct' }, scope: { context: 'agent', wire: 'agentId' },
+      parameters: [agentParameter, stringParameter('workflowId', 'dsh-runflow#WorkflowId')],
+      result: codec('dsh-runflow#RunFlowWebhookBindingOrNull', jsonSchema),
+    },
+    {
+      id: 'dsh-runflow#runflow/enable-webhook', service: 'runflowRemote', namespace: 'runflow', method: 'enableWebhook',
+      invocation: { kind: 'direct' }, scope: { context: 'agent', wire: 'agentId' },
+      parameters: [agentParameter, stringParameter('workflowId', 'dsh-runflow#WorkflowId'), stringParameter('triggerNodeId', 'dsh-runflow#NodeId')],
+      result: codec('dsh-runflow#RunFlowWebhookReceipt', jsonSchema),
+    },
+    {
+      id: 'dsh-runflow#runflow/disable-webhook', service: 'runflowRemote', namespace: 'runflow', method: 'disableWebhook',
+      invocation: { kind: 'direct' }, scope: { context: 'agent', wire: 'agentId' },
+      parameters: [agentParameter, stringParameter('workflowId', 'dsh-runflow#WorkflowId')],
+      result: codec('dsh-runflow#Boolean', booleanSchema),
+    },
     {
       id: 'dsh-runflow#runflow/workspace', service: 'runflowRemote', namespace: 'runflow', method: 'workspace',
       invocation: { kind: 'direct' }, scope: { context: 'agent', wire: 'agentId' }, parameters: [agentParameter],

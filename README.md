@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  深度融合 DeepSeek Harness 的可视化 DAG Workflow 插件
+  深度融合 DeepSeek Harness 的可视化 DAG 与状态图 Workflow 插件
 </p>
 
 <p align="center">
@@ -12,12 +12,13 @@
 
 DSH RunFlow 直接复用 DeepSeek Harness 的 Agent、Subagent、LLM Provider、`run_code`、scope、权限与生命周期能力，把可视化编排、节点开发和执行调试放进同一个 Host。它不是另一套 Agent Runtime，也不会通过独立 HTTP 服务绕过 DSH。
 
-> 当前版本为 `0.1.0` Alpha，Host 架构已升级为 v2。手动触发、分支、排序、聚合、JSON、等待、HTTP、JavaScript、DSH Agent 与存储节点可真实执行；Webhook、Schedule、DSH Event 和独立 LLM 节点仍会明确禁用，详见[能力边界](#能力边界)。
+> 当前版本为 `0.1.0` Alpha，Host 架构为 v2。旧 DAG 保持兼容，新增可选状态图、有限循环、共享状态归约和暂停恢复；支持手动、普通 Agent 与经过认证的 Webhook 入口。Webhook 需要现有 Host Web 服务和在线 Agent 绑定；Schedule、DSH Event 和独立 LLM 节点仍未实现。配置与限制见[状态图与入口指南](./docs/STATE_GRAPH_GUIDE.md)。
 
 ## 核心能力
 
 - **原生 DSH 执行**：`dsh.agent` 通过 `ctx.subagents.start()` 启动子 Agent，Provider、Model 与 capability 均从当前 Host 动态读取。
-- **可视化 DAG**：支持类型化命名端口、多输出、连接校验、多选、缩放、平移、兼容节点发现和端口预览。
+- **可视化 DAG 与状态图**：支持类型化命名端口、多输出、条件路由、并行汇合、共享状态和有限循环；未声明执行模式的旧流程继续按 DAG 执行。
+- **三种执行入口**：UI 手动执行、普通 Agent 的 `runflow` 工具、当前在线 Agent 授权的 Webhook 共用 Host 引擎；显式暂停后可由执行所属 Agent 恢复。
 - **多 Workflow 管理**：侧栏集中管理 Workflow、状态与最近执行；UI 创建和修改后立即持久化。
 - **可观测执行**：执行记录、节点状态、耗时、输入、输出、日志、错误与产物统一进入 Details UI。
 - **节点开发闭环**：创造模式工具和 Node Lab 支持创建、测试、热重载、内容哈希版本和通过测试后固化。
@@ -91,11 +92,13 @@ Host 会在执行前逐项校验 Provider capability。Provider 不支持的 `ou
 
 ### 5. 执行、调试和查看结果
 
-连接 DSH Host 后，**Execute workflow** 会调用当前主 Agent 授权的 Typert Remote；Host 立即返回 execution ID，UI 随后轮询状态。没有匿名 HTTP 执行入口，跨 Agent 读取或取消也会被拒绝。
+连接 DSH Host 后，**Execute workflow** 会调用当前主 Agent 授权的 Typert Remote；Host 立即返回 execution ID，UI 随后轮询状态。普通 Agent 也可通过 `runflow` 运行现有流程。Webhook 使用现有 Host HTTP 服务、在线绑定和 Bearer 认证；外部输入不能选择 Agent、流程定义或输出目录。跨 Agent 读取、取消或恢复执行会被拒绝。
 
 ![节点执行 Details UI](./output/playwright/host-integrated-creation-run-code.png)
 
 节点 Details 包含 **概览、输入、输出、日志、文件** 五类信息。失败时优先显示结构化错误；文件页会列出最终产物和 `intermediate/` 调试文件。节点卡片、端口预览的展开按钮和执行记录中的节点行都可以打开 Details。
+
+在 **运行设置 / Run settings** 中选择执行模式、最大步数、入口、初始状态和归约器。状态图显示步数与状态证据；`PAUSED` 表示等待明确的 JSON 恢复值，不代表失败或完成。`control.interrupt` 的恢复使用同一份冻结流程定义，不能自动恢复崩溃时任意 `RUNNING` 执行。完整配置与示例见[指南](./docs/STATE_GRAPH_GUIDE.md)。
 
 > 独立 `pnpm dev` 页面只用于检查布局与交互。未连接 DSH Host 时会显示 **Host disconnected** 并禁用真实执行，不会生成模拟结果。
 
@@ -148,7 +151,9 @@ pnpm dsh plugin --profile web add "link:../dsh-flow"
 ```mermaid
 flowchart LR
   UI[DSH Web / RunFlow UI] -->|Typert Remote + current agentId| REMOTE[RunFlow Remote]
-  REMOTE --> FLOW[ctx.flow / DAG Engine]
+  REMOTE --> FLOW[ctx.flow / DAG + State Graph Engine]
+  AGENT[普通 Agent / runflow tool] --> FLOW
+  WEB[Host Web Server] -->|Bearer + live Agent binding| FLOW
   FLOW --> SNAPSHOT[Node Provider snapshot]
   SNAPSHOT --> NODE[Built-in and file-backed nodes]
   NODE --> SUB[ctx.subagents.start]
@@ -161,12 +166,14 @@ flowchart LR
 
 关键边界：
 
-- Workflow 启动时建立 Node Provider 快照；一次运行始终使用同一组 Provider，即使文件在运行中发生变化。
+- 每次启动或恢复时建立 Node Provider 快照；该执行段使用同一组 Provider，即使文件在运行中发生变化。暂停恢复使用冻结 Workflow 定义，但重新获取当前可用的 Provider。
 - `nodes/` 和 `script/` 使用类似 `tsc --watch` 的单飞重载队列：文件事件合并、按 SHA-256 内容哈希判定版本、先卸载旧 Cordis fiber，再启用新版本。
 - 新版本导入或激活失败时会尝试恢复旧版本；后续文件事件会继续触发重载。
 - UI Remote 以当前主 Agent 为授权边界；单节点调试会执行目标节点及其全部上游依赖，而不是按画布顺序伪运行。
 
 ## 创造模式与 AI 作者工具
+
+插件启用后，普通在线 Agent 可使用运行工具 `runflow`：`capabilities/list/get/start/get_execution/list_executions/cancel/resume`。它只运行和检查已保存流程，不提供作者权限。运行时 skill `dsh-runflow` 引导 Agent 先检查实时能力；插件卸载时工具和该 skill 自动注销，旧调用也会再次检查服务是否可用。无需删除用户自己的 skill 文件。
 
 作者能力只注入默认 `cordis` 创造模式 scope，普通会话和其他 preset 不可见：
 
@@ -249,7 +256,7 @@ queued → running → success | error | cancelled
 
 ## 类型化端口与多输出
 
-- 支持 `any/json/text/number/boolean/file/files/image/audio/table/error`。
+- 支持 `any/flow/json/text/number/boolean/file/files/image/audio/table/error`；触发器的 `flow` 信号携带业务输入，状态控制节点可读取其中的 payload。
 - Edge 通过 `sourcePort` / `targetPort` 路由；执行前校验端口存在性、类型兼容和连接基数。
 - 未声明端口的旧节点按兼容的 `any input/output` 读取。
 - 每个命名 output 都有独立 preview 和 Details 入口，适合 HTTP、条件、Agent 和信息采集等多结果节点。
@@ -307,12 +314,22 @@ queued → running → success | error | cancelled
 | `watchFiles` | `true` | 监听 Workflow、Node 与 Script 文件变化 |
 | `enableAuthoringTools` | `true` | 是否安装创造模式 tools / skill |
 | `authoringPresetId` | `cordis` | 接收作者能力的 preset scope |
+| `enableWebhooks` | `true` | 在现有 Host `webServer` 可用时注册入口；仍需逐流程启用在线绑定 |
+| `apiPrefix` | `/api/runflow` | Host Webhook 路径前缀，绑定路径为 `<apiPrefix>/webhooks/<binding-id>` |
+
+状态图参数保存在 Workflow 的 `execution` 中：`mode: "state-graph"`、`entryNodeIds`、`initialState`、`reducers` 和 `maxSteps`（默认 100，范围 1–1000）。它们不是插件级配置。Webhook 的凭据和在线绑定不写入 Workflow 文件。
 
 ## 能力边界
 
 | 节点 | 状态 | 实现 |
 | --- | --- | --- |
-| `trigger.manual` | 可执行 | Host DAG 手动起点 |
+| `trigger.manual` | 可执行 | Host 手动入口，支持 DAG 与状态图 |
+| `trigger.agent` | 可执行 | 当前在线 Agent 的运行工具入口 |
+| `control.branch` / `control.switch` | 状态图可执行 | 单一条件路由或最多四条规则及默认分支 |
+| `control.parallel` / `control.join` | 状态图可执行 | 固定分支并行；Join 等待每条入边的新消息 |
+| `control.loop` | 状态图可执行 | 条件及迭代上限控制循环，另受全图步数上限约束 |
+| `state.read` / `state.update` | 状态图可执行 | 共享 JSON 状态与 replace / append / sum / merge 归约 |
+| `control.interrupt` / `control.end` | 状态图可执行 | 持久化暂停与授权恢复；结束当前分支 |
 | `builtin.condition` | 可执行 | 条件分支 |
 | `builtin.set` | 可执行 | 字段设置与转换 |
 | `builtin.switch` | 可执行 | 命名 match / fallback 多输出路由 |
@@ -324,7 +341,7 @@ queued → running → success | error | cancelled
 | `script.javascript` | 可执行 | `ctx.flowScript` → DSH `run_code` |
 | `http.request` | 可执行 | Host `fetch()`，支持 method、headers、JSON/string body |
 | `storage.write` | 可执行 | 写入本次 execution 的 `intermediate/` 并返回回执 |
-| `trigger.webhook` | 未实现 | 等待 Host listener provider |
+| `trigger.webhook` | 条件可用 | Host Web 服务 + 在线 Agent 绑定 + POST JSON / Bearer 认证 |
 | `trigger.schedule` | 未实现 | 等待 Host scheduler provider |
 | `trigger.dsh-event` | 未实现 | 等待 DSH event listener provider |
 | `dsh.llm` | 未实现 | 当前统一使用已完成权限集成的 `dsh.agent` |
@@ -349,8 +366,13 @@ pnpm check     # typecheck + tests + Host/client build
 nodes/                  Node executor、草稿、固化 Provider 与 Host Node 插件
 script/                 Script executor、run_code channel 与 Host Script 插件
 src/authoring-tools.ts  创造模式 scoped tools / skill
+src/runtime-tools.ts    普通 Agent 的运行、检查、取消与恢复
+src/runtime-skills.ts   插件生命周期拥有的运行指南
+src/webhook-ingress.ts  现有 Host HTTP 服务上的认证入口
 src/directory-plugin-loader.ts  内容哈希与串行热重载
 src/engine.ts           类型端口校验、DAG、retry / timeout / cancel
+src/state-graph.ts      按步调度、状态归约、checkpoint 与暂停恢复
+examples/workflows/    有限循环、并行归约、Webhook 审阅示例
 src/flow-service.ts     v2 应用门面、执行协调与 Provider snapshot
 src/backend/v2/         Workflow/Execution 文件仓库与 DSH Agent adapter
 src/remote-service.ts   Agent 授权的 start / poll / cancel Remote

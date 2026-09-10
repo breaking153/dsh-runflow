@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-typert-registry'
 import type { FlowConfig } from './contracts.ts'
 import { installRunFlowAuthoring } from './authoring-tools.ts'
+import { installRunFlowRuntime } from './runtime-tools.ts'
 import { FlowService } from './flow-service.ts'
 import { RunFlowRemoteService } from './remote-service.ts'
 import { RUNFLOW_HOST } from './remote-contract.ts'
@@ -48,6 +49,8 @@ export const Config: z<Config> = z.object({
   watchFiles: z.boolean().default(true),
   enableAuthoringTools: z.boolean().default(true),
   authoringPresetId: z.string().default('cordis'),
+  enableWebhooks: z.boolean().default(true),
+  apiPrefix: z.string().default('/api/runflow'),
 })
 
 /** Install the Host workflow service, Cordis executors, file watchers, and creation authoring layer. */
@@ -68,6 +71,10 @@ export async function apply(ctx: Context, config: Config = {}): Promise<void> {
   ctx.typert.register(RUNFLOW_HOST)
   await ctx.plugin(scriptPlugin, { scriptsDir, watchFiles: config.watchFiles ?? true })
   await ctx.plugin(nodeExecutorPlugin, { nodesDir, watchFiles: config.watchFiles ?? true })
+  installRunFlowRuntime(ctx, flow)
+  if (config.enableWebhooks ?? true) {
+    ctx.inject(['webServer'], webhookCtx => flow.webhooks.attach(webhookCtx))
+  }
   if (config.enableAuthoringTools ?? true) {
     ctx.inject(['agentPresets', 'skills', 'systemPrompt'], authoringCtx => {
       installRunFlowAuthoring(authoringCtx, flow, config.authoringPresetId ?? 'cordis')

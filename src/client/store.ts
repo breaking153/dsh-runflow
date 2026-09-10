@@ -1,4 +1,6 @@
 import { create } from 'zustand'
+import type { RunFlowStartReceipt } from '../remote-contract.ts'
+import type { RunFlowGatewayV2, RunFlowClientContext } from './application/runflow-gateway.ts'
 import {
   addEdge, applyEdgeChanges, applyNodeChanges,
   type Connection, type Edge, type EdgeChange, type Node, type NodeChange,
@@ -16,7 +18,7 @@ import {
 import { getRunFlowClientContext, getRunFlowGateway } from './runtime.ts'
 import { readBrowserStorage, writeBrowserStorage } from './application/browser-storage.ts'
 import { createWorkflowPersistenceQueue, sameWorkflowContent, type WorkflowDraft } from './application/workflow-persistence.ts'
-import { connectionForNewNode, type PendingNodeConnection } from './connection-planning.ts'
+import { connectionForNewNode, normalizeNodeConnection, type PendingNodeConnection } from './connection-planning.ts'
 import {
   createWorkflowReview,
   type CreateWorkflowReviewOptions,
@@ -143,6 +145,7 @@ function defaultDefinition(): WorkflowDefinition {
     id: 'pr-review-pipeline',
     name: 'PR Review Pipeline',
     version: 1,
+    execution: { mode: 'state-graph', maxSteps: 100 },
     nodes: [
       { id: 'manual', type: 'trigger.manual', name: 'Manual Trigger', config: {}, position: { x: 80, y: 220 } },
       { id: 'script', type: 'script.javascript', name: 'JavaScript', config: { code: 'const total = input.items?.length ?? 0\nreturn { ...input, total }', timeoutMs: 5000 }, position: { x: 390, y: 220 } },
@@ -291,7 +294,7 @@ function storedNodes(nodes: FlowNode[]) {
   }))
 }
 
-function definitionOf(state: Pick<FlowState, 'workflowId' | 'workflowName' | 'version' | 'nodes' | 'edges' | 'workflowOutputDir' | 'savedAt' | 'linksVisible' | 'minimapVisible' | 'subflows' | 'activeSubflowId' | 'rootGraphSnapshot'>): WorkflowDefinition {
+function definitionOf(state: Pick<FlowState, 'workflowId' | 'workflowName' | 'workflowExecution' | 'version' | 'nodes' | 'edges' | 'workflowOutputDir' | 'savedAt' | 'linksVisible' | 'minimapVisible' | 'subflows' | 'activeSubflowId' | 'rootGraphSnapshot'>): WorkflowDefinition {
   const rootNodes = state.rootGraphSnapshot?.nodes ?? state.nodes
   const rootEdges = state.rootGraphSnapshot?.edges ?? state.edges
   const subflows = state.subflows.map(subflow => state.activeSubflowId === subflow.id
@@ -359,6 +362,7 @@ function definitionOf(state: Pick<FlowState, 'workflowId' | 'workflowName' | 've
     id: state.workflowId,
     name: state.workflowName,
     version: state.version,
+    ...(state.workflowExecution === undefined ? {} : { execution: structuredClone(state.workflowExecution) }),
     nodes: [...storedNodes(rootNodes), ...subflows.flatMap(subflow => storedNodes(subflow.nodes))],
     edges: [...executableEdges(rootNodes, rootEdges), ...boundaryEdges, ...nestedEdges],
     ...(state.workflowOutputDir.trim() === '' ? {} : { outputDir: state.workflowOutputDir.trim() }),
@@ -383,6 +387,7 @@ function draftFrom(definition: WorkflowDefinition) {
     workflowId: definition.id,
     workflowName: definition.name,
     workflowOutputDir: definition.outputDir ?? '',
+    workflowExecution: definition.execution === undefined ? undefined : structuredClone(definition.execution),
     version: definition.version,
     savedAt: definition.updatedAt,
     nodes: graph.nodes,
@@ -447,11 +452,13 @@ export interface FlowState extends ReviewSlice {
     runCode: boolean
     nodeAuthoring: boolean
     sourceAuthoring: boolean
+    triggers?: { manual: boolean; agent: boolean; webhook: boolean }
   }
   sourceWorkbenchOpen: boolean
   workflowId: string
   workflowName: string
   workflowOutputDir: string
+  workflowExecution: WorkflowDefinition['execution']
   version: number
   nodes: FlowNode[]
   edges: FlowEdge[]
@@ -518,10 +525,12 @@ export interface FlowState extends ReviewSlice {
   duplicateNode(id: string): void
   setWorkflowName(name: string): void
   setWorkflowOutputDir(outputDir: string): void
+  setWorkflowExecution(execution: WorkflowDefinition['execution']): void
   setRunInput(input: string): void
   save(): Promise<void>
   run(nodeId?: string): Promise<void>
-  cancelRun(): Promise<void>
+  resumeRun(executionId: string, value: JsonValue): Promise<void>
+  cancelRun(executionId?: string): Promise<void>
   definition(): WorkflowDefinition
 }
 
@@ -544,6 +553,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   workflowId: first.id,
   workflowName: first.name,
   workflowOutputDir: first.outputDir ?? '',
+  workflowExecution: first.execution === undefined ? undefined : structuredClone(first.execution),
   version: first.version,
   nodes: initialGraph.nodes,
   edges: initialGraph.edges,
@@ -613,6 +623,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     const id = 'workflow-' + Date.now().toString(36)
     const definition: WorkflowDefinition = {
       id, name: 'My workflow', version: 1,
+      execution: { mode: 'state-graph', maxSteps: 100 },
       nodes: [{ id: 'manual-' + Date.now().toString(36), type: 'trigger.manual', name: 'Manual Trigger', config: {}, position: { x: 180, y: 240 } }],
       edges: [],
     }
@@ -741,9 +752,12 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     if (meaningful) scheduleAutosave()
   },
   onConnect(connection) {
+    const state = get()
+    const normalized = normalizeNodeConnection(state.nodes, connection, { mode: state.workflowExecution?.mode ?? 'dag', edges: state.edges })
+    if (normalized === undefined) return
     set(state => ({
       graphHistory: pushGraphHistory(state.graphHistory, { nodes: state.nodes, edges: state.edges }),
-      edges: addEdge({ ...connection, type: 'smoothstep', style: { stroke: 'var(--dsw-alias-border-strong, #7182aa)', strokeWidth: 1.7 } }, state.edges),
+      edges: addEdge({ ...normalized, type: 'smoothstep', style: { stroke: 'var(--dsw-alias-border-strong, #7182aa)', strokeWidth: 1.7 } }, state.edges),
       ...editedDraft(state),
     }))
     scheduleAutosave()
@@ -1065,6 +1079,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   },
   setWorkflowName(workflowName) { set(state => ({ workflowName, ...editedDraft(state) })); scheduleAutosave() },
   setWorkflowOutputDir(workflowOutputDir) { set(state => ({ workflowOutputDir, ...editedDraft(state) })); scheduleAutosave() },
+  setWorkflowExecution(workflowExecution) { set(state => ({ workflowExecution, ...editedDraft(state) })); scheduleAutosave() },
   setRunInput(runInput) { set({ runInput, runError: undefined }) },
   async save() {
     if (autosaveTimer !== undefined && typeof window !== 'undefined') {
@@ -1146,49 +1161,67 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     if (gateway === undefined || context === undefined) { set({ runError: 'Open a DSH main session before running this workflow.' }); return }
     let input: JsonValue
     try { input = parseRunInput(get().runInput) } catch (error) { set({ runError: 'Invalid run input JSON: ' + (error instanceof Error ? error.message : String(error)) }); return }
+    const workflowId = get().workflowId
     if (get().dirty) await get().save()
+    if (gateway !== getRunFlowGateway() || context.agentId !== getRunFlowClientContext()?.agentId || get().workflowId !== workflowId) return
     if (get().dirty) {
       set({ runError: get().saveError ?? 'Save the workflow before executing it.' })
       return
     }
     set(state => ({ running: true, activeExecutionId: undefined, runError: undefined, nodes: state.nodes.map(node => nodeId === undefined || node.id === nodeId ? { ...node, data: { ...node.data, status: 'WAITING' } } : node) }))
-    const publishExecution = (execution: WorkflowExecution): void => {
-      set(state => {
-        const records = new Map(execution.nodes.map(record => [record.nodeId, record]))
-        return {
-          selectedExecutionId: execution.id,
-          activeExecutionId: executionRunning(execution) ? execution.id : undefined,
-          running: executionRunning(execution),
-          executions: [execution, ...state.executions.filter(item => item.id !== execution.id)],
-          nodes: state.nodes.map(node => {
-            const record = records.get(node.id)
-            return record === undefined ? node : { ...node, data: { ...node.data, status: record.status, executionRecord: record } }
-          }),
-        }
-      })
-    }
     try {
       const definition = get().definition()
       const receipt = await gateway.executions.start(context, { definition, input, ...(definition.outputDir === undefined ? {} : { outputDir: definition.outputDir }), ...(nodeId === undefined ? {} : { targetNodeId: nodeId }) })
-      publishExecution(receipt.execution)
-      let execution = receipt.execution
-      while (executionRunning(execution)) {
-        await delay(300)
-        const next = await gateway.executions.read(context, receipt.executionId)
-        if (next === null) throw new Error('Host execution not found: ' + receipt.executionId)
-        execution = next
-        publishExecution(execution)
-      }
-      void get().refreshWorkspace()
-    } catch (error) { set({ running: false, activeExecutionId: undefined, runError: error instanceof Error ? error.message : String(error) }) }
+      await followExecution(receipt, gateway, context)
+    } catch (error) { if (gateway === getRunFlowGateway() && context.agentId === getRunFlowClientContext()?.agentId && get().workflowId === workflowId) set({ running: false, activeExecutionId: undefined, runError: error instanceof Error ? error.message : String(error) }) }
   },
-  async cancelRun() {
+  async resumeRun(executionId, value) {
     const gateway = getRunFlowGateway()
     const context = getRunFlowClientContext()
-    const executionId = get().activeExecutionId
+    if (gateway === undefined || context === undefined) { set({ runError: 'Open a DSH main session before resuming.' }); return }
+    set({ runError: undefined })
+    try {
+      const receipt = await gateway.executions.resume(context, executionId, value)
+      await followExecution(receipt, gateway, context)
+    } catch (error) {
+      if (gateway === getRunFlowGateway() && context.agentId === getRunFlowClientContext()?.agentId) set({ running: false, runError: error instanceof Error ? error.message : String(error) })
+    }
+  },
+  async cancelRun(requestedExecutionId) {
+    const gateway = getRunFlowGateway()
+    const context = getRunFlowClientContext()
+    const executionId = requestedExecutionId ?? get().activeExecutionId
     if (gateway === undefined || context === undefined || executionId === undefined) return
-    try { if (!await gateway.executions.cancel(context, executionId)) set({ runError: 'This execution has already finished.' }) }
+    try {
+      if (!await gateway.executions.cancel(context, executionId)) set({ runError: 'This execution has already finished.' })
+      else { const execution = await gateway.executions.read(context, executionId); if (execution !== null) await followExecution({ executionId, execution }, gateway, context) }
+    }
     catch (error) { set({ runError: error instanceof Error ? error.message : String(error) }) }
   },
   definition() { return definitionOf(get()) },
 }))
+
+async function followExecution(receipt: RunFlowStartReceipt, gateway: RunFlowGatewayV2, context: RunFlowClientContext): Promise<void> {
+  const isCurrent = (): boolean => gateway === getRunFlowGateway() && context.agentId === getRunFlowClientContext()?.agentId
+  let execution = receipt.execution
+  while (isCurrent()) {
+    useFlowStore.setState(state => {
+      const records = new Map(execution.nodes.map(record => [record.nodeId, record]))
+      return {
+        executions: [execution, ...state.executions.filter(item => item.id !== execution.id)],
+        ...(state.workflowId !== execution.workflowId ? {} : {
+          selectedExecutionId: execution.id,
+          activeExecutionId: executionRunning(execution) || execution.status === 'PAUSED' ? execution.id : undefined,
+          running: executionRunning(execution),
+          nodes: state.nodes.map(node => { const record = records.get(node.id); return record === undefined ? node : { ...node, data: { ...node.data, status: record.status, executionRecord: record } } }),
+        }),
+      }
+    })
+    if (!executionRunning(execution)) return
+    await delay(300)
+    if (!isCurrent()) return
+    const next = await gateway.executions.read(context, receipt.executionId)
+    if (next === null) throw new Error('Host execution not found: ' + receipt.executionId)
+    execution = next
+  }
+}

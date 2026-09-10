@@ -1,10 +1,14 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { createScope, type ScopeKey } from '@deepseek-ai/dsh-scope'
+import { createScope, type Scope, type ScopeKey } from '@deepseek-ai/dsh-scope'
 import { defineTool, RUN_CODE_NAME } from '@deepseek-ai/dsh-tools'
 import type { JsonObject, JsonValue, WorkflowDefinition, WorkflowNode } from './contracts.ts'
 import type { FlowService } from './flow-service.ts'
 import type { NodeDraftInput } from './node-library.ts'
+import {
+  assertRunFlowExecutionOwner, createRunFlowToolAccess, runFlowHistoryLimit,
+  runFlowSubject, type RunFlowToolAccess,
+} from './flow-tool-access.ts'
 
 interface AgentPresetScopes {
   standingKeyFor(id?: string): Promise<ScopeKey>
@@ -57,7 +61,7 @@ function json(value: unknown): JsonValue {
   return encoded === undefined ? null : JSON.parse(encoded) as JsonValue
 }
 
-function nodeTool(flow: FlowService) {
+function nodeTool(access: RunFlowToolAccess, presetId: string) {
   return defineTool({
     name: 'runflow_node',
     description:
@@ -81,6 +85,8 @@ function nodeTool(flow: FlowService) {
     },
     output: jsonOutput,
     async execute(args, exec) {
+      const { flow, agent, agentId } = access.require(exec)
+      if (agent.session.header.agentPreset !== presetId) throw new Error('RunFlow node authoring requires the configured creation preset')
       switch (args.action) {
         case 'list':
           return json({ nodes: flow.listNodeLibrary() })
@@ -96,10 +102,9 @@ function nodeTool(flow: FlowService) {
         case 'delete_draft':
           return json({ removed: flow.removeNodeDraft(requireString(args.type, 'type')) })
         case 'test': {
-          if (exec.agent === undefined) throw new Error('node tests require an Agent-backed creation session')
           const config = args.config === undefined ? undefined : requireObject(args.config, 'config')
           return json(await flow.testNodeDraft(requireString(args.type, 'type'), {
-            agentId: String(exec.agent.id),
+            agentId,
             ...(args.input === undefined ? {} : { input: args.input }),
             ...(config === undefined ? {} : { config }),
             ...(args.outputDir === undefined ? {} : { outputDir: args.outputDir }),
@@ -123,7 +128,7 @@ function nodeTool(flow: FlowService) {
   })
 }
 
-function workflowTool(flow: FlowService) {
+function workflowTool(access: RunFlowToolAccess, presetId: string) {
   return defineTool({
     name: 'runflow_workflow',
     description:
@@ -151,6 +156,8 @@ function workflowTool(flow: FlowService) {
     },
     output: jsonOutput,
     async execute(args, exec) {
+      const { flow, agent, agentId } = access.require(exec)
+      if (agent.session.header.agentPreset !== presetId) throw new Error('RunFlow workflow authoring requires the configured creation preset')
       switch (args.action) {
         case 'list':
           return json({ workflows: flow.listWorkflows() })
@@ -181,28 +188,32 @@ function workflowTool(flow: FlowService) {
             requireString(args.nodeId, 'nodeId'),
           ))
         case 'run':
-          if (exec.agent === undefined) throw new Error('workflow execution requires an Agent-backed session')
           return json(await flow.execute(requireString(args.workflowId, 'workflowId'), {
-            agentId: String(exec.agent.id),
+            agentId,
+            trigger: 'agent',
             ...(args.input === undefined ? {} : { input: args.input }),
             ...(args.outputDir === undefined ? {} : { outputDir: args.outputDir }),
             signal: exec.signal,
           }))
         case 'get_execution': {
           const id = requireString(args.executionId, 'executionId')
+          assertRunFlowExecutionOwner(flow, id, agentId)
           const execution = flow.execution(id)
           if (execution === undefined) throw new Error('execution not found: ' + id)
           return json(execution)
         }
-        case 'list_executions':
+        case 'list_executions': {
+          const limit = runFlowHistoryLimit(args.limit)
           return json({
-            executions: flow.listExecutions(
-              args.workflowId,
-              args.limit === undefined ? 50 : Math.max(0, args.limit),
-            ),
+            executions: flow.listExecutions(args.workflowId, Number.MAX_SAFE_INTEGER)
+              .filter(execution => flow.executionOwnedBy(execution.id, agentId)).slice(0, limit),
           })
-        case 'cancel':
-          return json({ cancelled: flow.cancel(requireString(args.executionId, 'executionId')) })
+        }
+        case 'cancel': {
+          const id = requireString(args.executionId, 'executionId')
+          assertRunFlowExecutionOwner(flow, id, agentId)
+          return json({ cancelled: flow.cancel(id) })
+        }
       }
     },
     presentCall(args) {
@@ -222,6 +233,9 @@ const AUTHORING_SKILL = [
   '# DSH RunFlow node development',
   '',
   'Use RunFlow only for workflow and node-authoring tasks in this DSH creation preset.',
+  'For ordinary execution use runflow when it is available. Its capabilities action reports current trigger support; a missing tool means the plugin is not active.',
+  'Inspect the current node catalog before authoring. State-graph workflows declare execution.mode="state-graph", entry nodes, initial state, reducers, and a finite maxSteps; conditional routes activate only their selected successors.',
+  'A PAUSED execution carries its checkpoint and requires an explicit resume value. Preserve the user’s requested review or decision instead of automatically approving an interrupt.',
   '',
   'Node lifecycle:',
   '1. Call runflow_node with action list/get before changing a provider.',
@@ -239,20 +253,23 @@ const AUTHORING_SKILL = [
   'Do not hand-edit JSON node documents when the draft/test/commit lifecycle can do it.',
 ].join('\n')
 
-/** Ensure the live creation Agent itself carries the executable authoring surface. */
+interface AuthoringContribution {
+  readonly presetId: string
+  ensure(agent: Agent): boolean
+}
+
+const authoringContributions = new WeakMap<FlowService, AuthoringContribution>()
+
+/** Ensure a live creation Agent has plugin-owned authoring contributions. */
 export function ensureRunFlowAgentAuthoring(
-  ctx: Context,
+  _ctx: Context,
   flow: FlowService,
   agent: Agent,
-  presetId = 'cordis',
+  presetId?: string,
 ): boolean {
-  if ((agent.session.header as { agentPreset?: string }).agentPreset !== presetId) return false
-  if (ctx.tools.get(RUN_CODE_NAME, agent) === undefined) agent.ctx.tools.presentAs('both')
-  if (ctx.tools.get('runflow_node', agent) === undefined) agent.ctx.tools.register(nodeTool(flow))
-  if (ctx.tools.get('runflow_workflow', agent) === undefined) agent.ctx.tools.register(workflowTool(flow))
-  return ctx.tools.get(RUN_CODE_NAME, agent) !== undefined
-    && ctx.tools.get('runflow_node', agent) !== undefined
-    && ctx.tools.get('runflow_workflow', agent) !== undefined
+  const contribution = authoringContributions.get(runFlowSubject(flow))
+  if (contribution === undefined || (presetId !== undefined && presetId !== contribution.presetId)) return false
+  return contribution.ensure(runFlowSubject(agent))
 }
 
 export function installRunFlowAuthoring(
@@ -261,15 +278,35 @@ export function installRunFlowAuthoring(
   presetId: string,
 ): void {
   ctx.effect(async function* () {
+    const access = createRunFlowToolAccess(ctx, flow)
+    const keyFlow = runFlowSubject(flow)
+    const agentScopes = new Map<Agent, Scope>()
+    const disposing = new Set<Promise<void>>()
+    const releaseAgent = (agent: Agent): void => {
+      const subject = runFlowSubject(agent)
+      const scope = agentScopes.get(subject)
+      if (scope === undefined) return
+      agentScopes.delete(subject)
+      const task = scope.dispose().catch(error => { ctx.logger.warn(error) })
+      disposing.add(task)
+      void task.finally(() => disposing.delete(task))
+    }
+    yield async () => {
+      access.close()
+      for (const scope of agentScopes.values()) await scope.dispose()
+      agentScopes.clear()
+      await Promise.all(disposing)
+    }
     const presets = ctx.get('agentPresets') as AgentPresetScopes | undefined
     const skills = ctx.get('skills') as RuntimeSkills | undefined
     if (presets === undefined || skills === undefined) return
     const key = await presets.standingKeyFor(presetId)
     const scope = createScope(ctx, key)
-    const installInto = (target: Context): void => {
-      if (target.tools.get(RUN_CODE_NAME) === undefined) target.tools.presentAs('both')
-      if (target.tools.get('runflow_node') === undefined) target.tools.register(nodeTool(flow))
-      if (target.tools.get('runflow_workflow') === undefined) target.tools.register(workflowTool(flow))
+    yield () => scope.dispose()
+    const installInto = (target: Context, targetKey: ScopeKey): void => {
+      if (target.tools.get(RUN_CODE_NAME, targetKey) === undefined) target.tools.presentAs('both')
+      if (target.tools.get('runflow_node', targetKey) === undefined) target.tools.register(nodeTool(access, presetId))
+      if (target.tools.get('runflow_workflow', targetKey) === undefined) target.tools.register(workflowTool(access, presetId))
       ;(target.get('skills') as RuntimeSkills).register({
         name: 'dsh-runflow-node-development',
         description: 'Create, test, debug, and solidify typed RunFlow nodes through DSH run_code.',
@@ -280,25 +317,36 @@ export function installRunFlowAuthoring(
     }
     const isCreationAgent = (agent: Agent): boolean =>
       (agent.session.header as { agentPreset?: string }).agentPreset === presetId
-    try {
-      installInto(scope.ctx)
-    } catch (error) {
-      await scope.dispose()
-      throw error
+    installInto(scope.ctx, key)
+    const contribution: AuthoringContribution = {
+      presetId,
+      ensure(view) {
+        const agent = runFlowSubject(view)
+        const agents = ctx.get('agents')
+        if (!isCreationAgent(agent)
+          || !agents?.list().some(candidate => runFlowSubject(candidate) === agent)) return false
+        if (!agentScopes.has(agent)
+          && (ctx.tools.get('runflow_node', agent) === undefined || ctx.tools.get('runflow_workflow', agent) === undefined)) {
+          const fallback = createScope(ctx, agent)
+          agentScopes.set(agent, fallback)
+          try { installInto(fallback.ctx, agent) } catch (error) {
+            releaseAgent(agent)
+            throw error
+          }
+        }
+        return ctx.tools.get('runflow_node', agent) !== undefined
+          && ctx.tools.get('runflow_workflow', agent) !== undefined
+          && ctx.tools.get(RUN_CODE_NAME, agent) !== undefined
+      },
     }
-    // A standing preset scope is the normal inheritance route. The fallback
-    // below also covers agents that were already live when this plugin was
-    // installed or whose parent link was established before this contribution.
-    const attach = (agent: Agent): void => {
-      if (!isCreationAgent(agent) || ctx.tools.get('runflow_node', agent) !== undefined) return
-      ensureRunFlowAgentAuthoring(ctx, flow, agent, presetId)
+    authoringContributions.set(keyFlow, contribution)
+    yield () => {
+      access.close()
+      if (authoringContributions.get(keyFlow) === contribution) authoringContributions.delete(keyFlow)
     }
     const agents = ctx.get('agents') as { list(): Agent[] } | undefined
-    for (const agent of agents?.list() ?? []) attach(agent)
-    const stopAgents = ctx.on('agent/created', ({ agent }) => attach(agent))
-    yield async () => {
-      stopAgents()
-      await scope.dispose()
-    }
+    for (const agent of agents?.list() ?? []) contribution.ensure(agent)
+    yield ctx.on('agent/created', ({ agent }) => { contribution.ensure(agent) })
+    yield ctx.on('agent/disposed', ({ agent }) => { releaseAgent(agent) })
   }, 'dsh-runflow: creation-mode authoring layer')
 }

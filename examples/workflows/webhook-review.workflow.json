@@ -1,0 +1,21 @@
+{
+  "id": "example-webhook-review", "name": "Webhook input with review", "version": 1,
+  "execution": { "mode": "state-graph", "maxSteps": 15, "initialState": {} },
+  "nodes": [
+    { "id": "webhook", "type": "trigger.webhook", "config": {}, "position": { "x": 40, "y": 60 } },
+    { "id": "manual", "type": "trigger.manual", "config": {}, "position": { "x": 40, "y": 260 } },
+    { "id": "input", "type": "state.update", "config": { "key": "request", "source": "input" }, "position": { "x": 320, "y": 100 } },
+    { "id": "review", "type": "control.interrupt", "config": { "prompt": "Approve this input? Resume with true or false.", "stateKey": "approved" }, "position": { "x": 600, "y": 100 } },
+    { "id": "branch", "type": "control.branch", "config": { "source": "state", "path": "approved", "operator": "equals", "value": true }, "position": { "x": 880, "y": 100 } },
+    { "id": "accepted", "type": "control.end", "config": {}, "position": { "x": 1160, "y": 40 } },
+    { "id": "declined", "type": "control.end", "config": {}, "position": { "x": 1160, "y": 260 } }
+  ],
+  "edges": [
+    { "from": "webhook", "to": "input", "sourcePort": "output", "targetPort": "input" },
+    { "from": "manual", "to": "input", "sourcePort": "output", "targetPort": "input" },
+    { "from": "input", "to": "review", "sourcePort": "output", "targetPort": "input" },
+    { "from": "review", "to": "branch", "sourcePort": "output", "targetPort": "input" },
+    { "from": "branch", "to": "accepted", "sourcePort": "true", "targetPort": "input" },
+    { "from": "branch", "to": "declined", "sourcePort": "false", "targetPort": "input" }
+  ]
+}

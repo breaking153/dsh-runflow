@@ -5,6 +5,8 @@ import { CATEGORY_LABELS, NodeIcon } from './catalog.tsx'
 import { modelsForProvider, useFlowModelCatalog } from './model-catalog.ts'
 import { useFlowRuntime } from './runtime.ts'
 import { useFlowStore } from './store.ts'
+import { WebhookSettings } from './WebhookSettings.tsx'
+import { StateGraphNodeConfig, isStateGraphNode } from './StateGraphNodeConfig.tsx'
 import { LightCodeEditor } from './LightCodeEditor.tsx'
 import { useRunFlowLocale } from './locale.ts'
 
@@ -303,7 +305,9 @@ export function PropertyInspector({ hidden = false, onClose, showOutputTab = tru
         </section>
         <section className={'form-section ' + (inspectorTab === 'parameters' ? '' : 'inspector-tab-hidden')}>
           <div className="form-section-title">{t('configuration')}</div>
-          {type === 'trigger.webhook' && <ConfigField label="Webhook Path" value={node.data.config['path']} onChange={value => setConfig('path', value)} />}
+          {isStateGraphNode(type) && <StateGraphNodeConfig key={node.id} type={type} config={node.data.config} onChange={config => updateNode(node.id, { config })} />}
+          {type === 'trigger.agent' && <p className="model-catalog-note">{capabilities.triggers?.agent ? 'AI Agent 可通过 RunFlow 工具向此入口传入 JSON。' : '当前 Host 未开放 Agent 触发能力；工作流可继续编辑。'}</p>}
+          {type === 'trigger.webhook' && <WebhookSettings triggerNodeId={node.id} />}
           {type === 'trigger.schedule' && <ConfigField label="Cron Expression" value={node.data.config['cron'] ?? '0 8 * * *'} onChange={value => setConfig('cron', value)} />}
           {type === 'http.request' && <>
             <label className="field"><span>Method</span><select value={String(node.data.config['method'] ?? 'GET')} onChange={event => setConfig('method', event.target.value)}><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select></label>
@@ -394,7 +398,7 @@ export function PropertyInspector({ hidden = false, onClose, showOutputTab = tru
             {!capabilities.runCode && <div className="model-catalog-note is-error">当前会话未暴露 run_code。切换到 DSH 创造模式后再执行此节点。</div>}
           </>}
           {type === 'storage.write' && <ConfigField label="Collection" value={node.data.config['collection']} onChange={value => setConfig('collection', value)} />}
-          {!['trigger.manual', 'trigger.webhook', 'trigger.schedule', 'trigger.dsh-event', 'http.request', 'builtin.condition', 'builtin.filter', 'builtin.merge', 'builtin.limit', 'builtin.date-time', 'builtin.switch', 'builtin.sort', 'builtin.aggregate', 'builtin.json-parse', 'builtin.json-stringify', 'builtin.wait', 'builtin.stop-error', 'builtin.noop', 'dsh.agent', 'script.javascript', 'storage.write'].includes(type) && <ConfigField label="Value" value={node.data.config['value']} onChange={value => setConfig('value', value)} />}
+          {!isStateGraphNode(type) && !['trigger.agent', 'trigger.manual', 'trigger.webhook', 'trigger.schedule', 'trigger.dsh-event', 'http.request', 'builtin.condition', 'builtin.filter', 'builtin.merge', 'builtin.limit', 'builtin.date-time', 'builtin.switch', 'builtin.sort', 'builtin.aggregate', 'builtin.json-parse', 'builtin.json-stringify', 'builtin.wait', 'builtin.stop-error', 'builtin.noop', 'dsh.agent', 'script.javascript', 'storage.write'].includes(type) && <ConfigField label="Value" value={node.data.config['value']} onChange={value => setConfig('value', value)} />}
         </section>
         {showOutputTab && inspectorTab === 'output' && node.data.executionRecord !== undefined && <section className="form-section inspector-output-panel">
           <div className="form-section-title">{t('output')}</div>

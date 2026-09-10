@@ -2,6 +2,7 @@ import type { Context, Plugin } from '@deepseek-ai/cordis'
 import type {
   JsonValue,
   NodeExecutionContext,
+  NodeControlEnvelope,
   NodeOutputEnvelope,
   WorkflowNodeDescriptor,
 } from './contracts.ts'
@@ -18,7 +19,7 @@ export interface RunFlowHostNodePluginDefinition {
   execute(
     ctx: RunFlowHostPluginContext,
     execution: NodeExecutionContext,
-  ): JsonValue | NodeOutputEnvelope | Promise<JsonValue | NodeOutputEnvelope>
+  ): JsonValue | NodeOutputEnvelope | NodeControlEnvelope | Promise<JsonValue | NodeOutputEnvelope | NodeControlEnvelope>
 }
 
 /**

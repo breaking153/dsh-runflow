@@ -1,0 +1,24 @@
+{
+  "id": "example-parallel-reduce", "name": "Parallel branches and reducer", "version": 1,
+  "execution": { "mode": "state-graph", "maxSteps": 12, "initialState": { "total": 0 }, "reducers": { "total": "sum" } },
+  "nodes": [
+    { "id": "manual", "type": "trigger.manual", "config": {}, "position": { "x": 40, "y": 100 } },
+    { "id": "agent", "type": "trigger.agent", "config": {}, "position": { "x": 40, "y": 300 } },
+    { "id": "parallel", "type": "control.parallel", "config": { "branchCount": 2 }, "position": { "x": 320, "y": 160 } },
+    { "id": "first", "type": "state.update", "config": { "key": "total", "source": "value", "value": 2 }, "position": { "x": 600, "y": 40 } },
+    { "id": "second", "type": "state.update", "config": { "key": "total", "source": "value", "value": 3 }, "position": { "x": 600, "y": 300 } },
+    { "id": "join", "type": "control.join", "config": {}, "position": { "x": 880, "y": 160 } },
+    { "id": "read", "type": "state.read", "config": { "path": "total" }, "position": { "x": 1160, "y": 160 } },
+    { "id": "end", "type": "control.end", "config": {}, "position": { "x": 1440, "y": 160 } }
+  ],
+  "edges": [
+    { "from": "manual", "to": "parallel", "sourcePort": "output", "targetPort": "input" },
+    { "from": "agent", "to": "parallel", "sourcePort": "output", "targetPort": "input" },
+    { "from": "parallel", "to": "first", "sourcePort": "branch1", "targetPort": "input" },
+    { "from": "parallel", "to": "second", "sourcePort": "branch2", "targetPort": "input" },
+    { "from": "first", "to": "join", "sourcePort": "output", "targetPort": "input" },
+    { "from": "second", "to": "join", "sourcePort": "output", "targetPort": "input" },
+    { "from": "join", "to": "read", "sourcePort": "output", "targetPort": "input" },
+    { "from": "read", "to": "end", "sourcePort": "output", "targetPort": "input" }
+  ]
+}
