@@ -16,4 +16,4 @@
 ## 4. Assurance and delivery
 - [x] 4.1 Independently review runtime, persistence, ingress and lifecycle changes and resolve actionable findings.
 - [x] 4.2 Run full tests, type checks, builds, browser checks, documentation privacy and strict OpenSpec validation.
-- [ ] 4.3 Commit and push the reviewed branch, synchronize/archive specifications and verify remote HEAD.
+- [x] 4.3 Commit and push the reviewed branch, synchronize/archive specifications and verify remote HEAD.
