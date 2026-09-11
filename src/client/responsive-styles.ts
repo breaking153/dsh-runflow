@@ -25,7 +25,7 @@ export const RUNFLOW_RESPONSIVE_STYLES = String.raw`
   .inspector-wrap{position:absolute;right:0;top:0;bottom:0;z-index:25;width:min(318px,calc(100% - 64px));filter:drop-shadow(-8px 0 18px rgba(25,55,120,.12))}
   .inspector-wrap.closed{width:0}
   .flow-panel.inspector{width:100%}
-  .selection-toolbar{max-width:calc(100% - 20px);overflow-x:auto;scrollbar-width:thin}
+  .selection-toolbar{z-index:24;max-width:calc(100% - 20px);overflow-x:auto;scrollbar-width:thin}
 }
 
 @container runflow-shell (max-width:880px){

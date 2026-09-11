@@ -5,6 +5,8 @@ import type {
   WorkflowNodeDefinition,
 } from '../src/contracts.ts'
 import { controlNodeDefinitions } from './control-nodes.ts'
+import { valueNodeDefinitions } from './value-nodes.ts'
+import { withCoreNodeExecution } from '../src/core-node-execution.ts'
 
 export type AgentNodeExecutor = (context: NodeExecutionContext) => Promise<JsonValue>
 
@@ -96,8 +98,9 @@ function numericValues(value: JsonValue, path: string): number[] {
 }
 
 export function builtinNodeDefinitions(executeAgent: AgentNodeExecutor): WorkflowNodeDefinition[] {
-  return [
+  const definitions: WorkflowNodeDefinition[] = [
     ...controlNodeDefinitions(),
+    ...valueNodeDefinitions(),
     {
       type: 'trigger.manual',
       title: 'Manual Trigger',
@@ -439,7 +442,8 @@ export function builtinNodeDefinitions(executeAgent: AgentNodeExecutor): Workflo
         const outboundHeaders = requestHeaders(node.config['headers'])
         const request: RequestInit = { method, headers: outboundHeaders, signal }
         if (method !== 'GET' && method !== 'HEAD') {
-          const body = node.config['body'] ?? inputs['body'] ?? value
+          const body = Object.hasOwn(node.config, 'body') ? node.config['body']
+            : Object.hasOwn(inputs, 'body') ? inputs['body'] : value
           if (typeof body === 'string') request.body = body
           else {
             request.body = JSON.stringify(body)
@@ -547,4 +551,5 @@ export function builtinNodeDefinitions(executeAgent: AgentNodeExecutor): Workflo
       },
     },
   ]
+  return definitions.map(withCoreNodeExecution)
 }

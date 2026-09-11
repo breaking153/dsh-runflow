@@ -8,11 +8,12 @@ export function CanvasConnectionLine(props: ConnectionLineComponentProps<FlowNod
   const nodes = useFlowStore(state => state.nodes)
   const edges = useFlowStore(state => state.edges)
   const mode = useFlowStore(state => state.workflowExecution?.mode ?? 'dag')
+  const semantics = useFlowStore(state => state.workflowExecution?.semantics)
   const { fromNode, fromHandle, toNode, toHandle, onFeedback } = props
   const result = useMemo<ConnectionValidation | undefined>(() => {
     if (toNode === null || toHandle === null) return undefined
-    return validateDraggedConnection(nodes, { nodeId: fromNode.id, handleId: fromHandle.id ?? null, type: fromHandle.type }, { nodeId: toNode.id, handleId: toHandle.id ?? null, type: toHandle.type }, { mode, edges })
-  }, [nodes, edges, mode, fromNode.id, fromHandle.id, fromHandle.type, toNode?.id, toHandle?.id, toHandle?.type])
+    return validateDraggedConnection(nodes, { nodeId: fromNode.id, handleId: fromHandle.id ?? null, type: fromHandle.type }, { nodeId: toNode.id, handleId: toHandle.id ?? null, type: toHandle.type }, { mode, semantics, edges })
+  }, [nodes, edges, mode, semantics, fromNode.id, fromHandle.id, fromHandle.type, toNode?.id, toHandle?.id, toHandle?.type])
   useEffect(() => { onFeedback?.(result) }, [result, onFeedback])
   const sourcePort = (fromHandle.type === 'source' ? fromNode.data.outputs : fromNode.data.inputs).find(port => port.id === fromHandle.id)
   const invalid = props.connectionStatus === 'invalid' || result?.ok === false

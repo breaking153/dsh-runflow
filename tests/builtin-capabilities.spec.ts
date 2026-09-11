@@ -144,6 +144,33 @@ describe('real builtin node capabilities', () => {
     expect(fallback).toEqual({ $runflow: 'port-outputs', outputs: { fallback: { priority: 'low', id: 8 }, index: -1 } })
   })
 
+  it.each([
+    { configBody: null, wiredBody: { ignored: true }, expected: 'null' },
+    { configBody: false, wiredBody: { ignored: true }, expected: 'false' },
+    { configBody: 0, wiredBody: { ignored: true }, expected: '0' },
+    { configBody: '', wiredBody: { ignored: true }, expected: '' },
+  ])('preserves an explicitly configured HTTP body $configBody', async ({ configBody, wiredBody, expected }) => {
+    const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response('{}'))
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      await node('http.request').execute(context('http.request', {
+        url: 'https://example.test/body', method: 'POST', body: configBody,
+      }, { fallback: true }, vi.fn(), { body: wiredBody }))
+      expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(expected)
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('preserves an explicitly null HTTP body from the declared body input', async () => {
+    const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response('{}'))
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      await node('http.request').execute(context('http.request', {
+        url: 'https://example.test/body', method: 'POST',
+      }, { fallback: true }, vi.fn(), { body: null }))
+      expect(fetchMock.mock.calls[0]?.[1]?.body).toBe('null')
+    } finally { vi.unstubAllGlobals() }
+  })
+
   it('provides typed Sort, Aggregate, and JSON transform nodes', async () => {
     const writeIntermediate = vi.fn()
     await expect(node('builtin.sort').execute(context(

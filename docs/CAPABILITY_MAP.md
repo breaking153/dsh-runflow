@@ -45,7 +45,7 @@ RunFlow does not adopt ComfyUI-specific media preview panels, model/assets manag
 - `pnpm check` passes without skipped tests or new type/lint suppressions.
 - New graph state primitives have unit tests; key user paths have browser verification.
 - The real Vite build is opened in a browser and inspected for console/runtime errors.
-- Desktop and compact-window screenshots are captured under `output/playwright/`.
+- Reviewed desktop and compact-window screenshots are archived under `docs/assets/evidence/playwright/`; new captures go to the ignored `output/playwright/` directory.
 
 ## Current subflow boundary
 

@@ -26,6 +26,26 @@ function changeValue(element: HTMLInputElement | HTMLTextAreaElement, value: str
 }
 
 describe('workflow execution settings', () => {
+  it('keeps saved graphs in legacy semantics until explicitly switched, then removes the flag when switched back', async () => {
+    await openSettings()
+    const semantics = host.querySelector<HTMLSelectElement>('select[aria-label="Execution semantics"]')
+    expect(semantics).not.toBeNull()
+    expect(semantics!.value).toBe('legacy')
+    expect(useFlowStore.getState().definition().execution?.semantics).toBeUndefined()
+    await act(async () => { semantics!.value = 'blueprint'; semantics!.dispatchEvent(new Event('change', { bubbles: true })) })
+    expect(useFlowStore.getState().definition().execution).toMatchObject({ mode: 'state-graph', semantics: 'blueprint', maxSteps: 100 })
+    expect(host.textContent).toContain('Data wires supply values')
+    await act(async () => { semantics!.value = 'legacy'; semantics!.dispatchEvent(new Event('change', { bubbles: true })) })
+    expect(useFlowStore.getState().definition().execution).toEqual({ mode: 'state-graph', maxSteps: 100 })
+  })
+
+  it('creates blank workflows using Blueprint without converting an existing definition', () => {
+    const before = useFlowStore.getState().definition()
+    useFlowStore.getState().createWorkflow()
+    expect(useFlowStore.getState().definition().execution).toEqual({ mode: 'state-graph', semantics: 'blueprint', maxSteps: 100 })
+    expect(before.execution?.semantics).toBeUndefined()
+  })
+
   it('edits state graph limits and entry nodes from the workflow settings', async () => {
     await openSettings()
     const limit = host.querySelector<HTMLInputElement>('input[aria-label="Maximum steps"]')!

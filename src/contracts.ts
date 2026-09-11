@@ -11,6 +11,8 @@ export interface WorkflowPortDescriptor {
   description?: string
   required?: boolean
   multiple?: boolean
+  /** Declared configuration path supplied by this promoted instance input. */
+  configKey?: string
 }
 
 /** Explicit envelope used when a node publishes more than one named output. */
@@ -36,6 +38,8 @@ export type NodeControlEnvelope = {
 export type WorkflowStateReducer = 'replace' | 'append' | 'sum' | 'merge'
 export interface WorkflowExecutionConfig {
   mode: 'dag' | 'state-graph'
+  /** Omitted retains the original edge-driven execution behavior. */
+  semantics?: 'blueprint'
   entryNodeIds?: string[]
   /** Maximum committed super-steps, between 1 and 1000. Defaults to 100. */
   maxSteps?: number
@@ -71,6 +75,8 @@ export interface WorkflowNode {
   type: string
   name?: string
   config: JsonObject
+  /** Declared configuration paths exposed as typed input pins on this instance. */
+  promotedInputs?: string[]
   position?: WorkflowPosition
   disabled?: boolean
 }
@@ -154,6 +160,13 @@ export interface WorkflowDefinition {
 export type ExecutionStatus = 'PENDING' | 'RUNNING' | 'PAUSED' | 'SUCCESS' | 'FAILED' | 'CANCELLED'
 export type NodeExecutionStatus = 'WAITING' | 'RUNNING' | 'PAUSED' | 'SUCCESS' | 'FAILED' | 'SKIPPED' | 'CANCELLED'
 
+export interface WorkflowCallScope {
+  /** One trigger invocation; sibling flow branches retain this identity. */
+  id: string
+  /** Effect outputs available on this execution path, never shared across calls. */
+  outputs: Record<string, JsonObject>
+}
+
 export interface WorkflowActivation {
   nodeId: string
   /** Stable definition.edges index, used to distinguish join channels. */
@@ -162,6 +175,7 @@ export interface WorkflowActivation {
   sourcePort?: string
   targetPort?: string
   value: JsonValue
+  call?: WorkflowCallScope
 }
 
 export interface WorkflowStepRecord {
@@ -173,6 +187,7 @@ export interface WorkflowStepRecord {
 /** Persisted only at a completed step boundary. Not an exactly-once guarantee. */
 export interface WorkflowGraphCheckpoint {
   schemaVersion: 1
+  semantics?: 'blueprint'
   workflowId: string
   workflowVersion: number
   executionId: string
@@ -186,11 +201,16 @@ export interface WorkflowGraphCheckpoint {
   steps: WorkflowStepRecord[]
   lastOutputs: JsonObject
   lastPortOutputs: Record<string, JsonObject>
+  /** Original terminal result before a synthetic completion port was appended. */
+  lastTerminalOutputs?: JsonObject
   interrupts: JsonObject
 }
 
 export interface NodeExecutionRecord {
   nodeId: string
+  callId?: string
+  /** Consumer whose arguments demanded this pure visit. */
+  evaluatedFor?: string
   step?: number
   iteration?: number
   status: NodeExecutionStatus
@@ -249,10 +269,15 @@ export interface WorkflowNodeDescriptor {
   available?: boolean
   /** State graph activation: any message, or one from every incoming edge. */
   activation?: 'any' | 'all'
+  /** Blueprint purity must be explicit; undeclared non-trigger providers are effectful. */
+  executionKind?: 'trigger' | 'pure' | 'effect'
+  /** Declared effect flow output emitted on successful completion when absent. */
+  completionPort?: string
 }
 
 export interface NodeExecutionContext {
   executionId: string
+  callId?: string
   /** Live parent Agent selected by the trusted Host caller. */
   agentId?: string
   workflow: WorkflowDefinition
@@ -358,7 +383,7 @@ export interface FlowConfig {
 }
 
 export interface WorkflowValidationIssue {
-  code: 'DUPLICATE_NODE' | 'MISSING_NODE' | 'SELF_EDGE' | 'CYCLE' | 'EMPTY_WORKFLOW' | 'UNKNOWN_PORT' | 'PORT_TYPE_MISMATCH' | 'PORT_CARDINALITY' | 'INVALID_EXECUTION'
+  code: 'DUPLICATE_NODE' | 'MISSING_NODE' | 'SELF_EDGE' | 'CYCLE' | 'EMPTY_WORKFLOW' | 'UNKNOWN_PORT' | 'PORT_TYPE_MISMATCH' | 'PORT_CARDINALITY' | 'INVALID_EXECUTION' | 'INVALID_PROPERTY'
   message: string
   nodeId?: string
 }

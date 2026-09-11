@@ -9,7 +9,9 @@ describe('RunFlow container-responsive layout', () => {
     expect(RUNFLOW_RESPONSIVE_STYLES).toContain('@container runflow-shell (max-width:720px)')
   })
 
-  it('keeps multiselect actions above the inspector drawer', () => {
+  it('keeps narrow selection actions below the inspector drawer so its tabs remain usable', () => {
     expect(COMFY_INTERACTION_STYLES).toContain('.selection-toolbar{position:absolute;z-index:32')
+    expect(RUNFLOW_RESPONSIVE_STYLES).toContain('.selection-toolbar{z-index:24;')
+    expect(RUNFLOW_RESPONSIVE_STYLES).toContain('bottom:0;z-index:25;')
   })
 })

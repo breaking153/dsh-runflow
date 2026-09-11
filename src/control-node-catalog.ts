@@ -9,6 +9,7 @@ const flowPorts = (...ids: string[]): WorkflowPortDescriptor[] => ids.map(id => 
 const jsonOutput: WorkflowPortDescriptor[] = [{ id: 'output', label: 'json', type: 'json' }]
 const base = {
   category: 'logic' as const, group: 'Core/State Graph', color: '#a78bfa', icon: 'git-branch',
+  executionKind: 'effect' as const,
   inputs: [flowInput, dataInput], outputs: flowPorts('output'),
 }
 const comparisonSchema: JsonObject = {
@@ -54,8 +55,14 @@ export function controlNodeDescriptors(): WorkflowNodeDescriptor[] {
     {
       ...base, type: 'state.read', title: 'Read State', category: 'data', color: '#38bdf8', icon: 'database',
       description: 'Read a shared state field after the previous step has committed.',
-      inputs: [flowInput], outputs: jsonOutput,
+      inputs: [flowInput], outputs: [...jsonOutput, ...flowPorts('flow')], completionPort: 'flow',
       configSchema: { type: 'object', properties: { path: { type: 'string', default: '' } } },
+    },
+    {
+      ...base, type: 'state.get', title: 'Get State', category: 'data', color: '#38bdf8', icon: 'database',
+      description: 'Read the current state snapshot when a connected node needs the value.',
+      executionKind: 'pure', inputs: [], outputs: jsonOutput,
+      configSchema: { type: 'object', properties: { path: { title: 'State path', type: 'string', default: '' } } },
     },
     {
       ...base, type: 'state.update', title: 'Update State', category: 'data', color: '#38bdf8', icon: 'list-plus',

@@ -1,0 +1,25 @@
+{
+  "id": "demo-conditional-branch",
+  "name": "Demo 02 · 条件分支 / Conditional outcomes",
+  "version": 1,
+  "execution": { "mode": "state-graph", "semantics": "blueprint", "maxSteps": 20 },
+  "nodes": [
+    { "id": "demo-branch-start", "type": "trigger.manual", "name": "开始 / Start", "config": {}, "position": { "x": 40, "y": 100 } },
+    { "id": "demo-branch-flag", "type": "value.boolean", "name": "允许发布？ / Allow", "config": { "value": true }, "position": { "x": 40, "y": 380 } },
+    { "id": "demo-branch-check", "type": "control.branch", "name": "选择一个结果 / Branch", "config": { "source": "input", "path": "", "operator": "equals", "value": true }, "position": { "x": 360, "y": 160 } },
+    { "id": "demo-branch-approved", "type": "builtin.set", "name": "允许发布 / Approved", "config": { "values": { "decision": "approved", "next": "publish" } }, "position": { "x": 700, "y": 40 } },
+    { "id": "demo-branch-review", "type": "builtin.set", "name": "转人工复核 / Review", "config": { "values": { "decision": "review", "next": "manual-review" } }, "position": { "x": 700, "y": 390 } },
+    { "id": "demo-branch-approved-end", "type": "control.end", "name": "发布结果 / Approved result", "config": {}, "position": { "x": 1040, "y": 40 } },
+    { "id": "demo-branch-review-end", "type": "control.end", "name": "复核结果 / Review result", "config": {}, "position": { "x": 1040, "y": 390 } }
+  ],
+  "edges": [
+    { "id": "demo-branch-start-check", "from": "demo-branch-start", "to": "demo-branch-check", "sourcePort": "output", "targetPort": "input" },
+    { "id": "demo-branch-flag-check", "from": "demo-branch-flag", "to": "demo-branch-check", "sourcePort": "value", "targetPort": "data" },
+    { "id": "demo-branch-true", "from": "demo-branch-check", "to": "demo-branch-approved", "sourcePort": "true", "targetPort": "input" },
+    { "id": "demo-branch-false", "from": "demo-branch-check", "to": "demo-branch-review", "sourcePort": "false", "targetPort": "input" },
+    { "id": "demo-branch-approved-flow", "from": "demo-branch-approved", "to": "demo-branch-approved-end", "sourcePort": "flow", "targetPort": "input" },
+    { "id": "demo-branch-approved-data", "from": "demo-branch-approved", "to": "demo-branch-approved-end", "sourcePort": "output", "targetPort": "data" },
+    { "id": "demo-branch-review-flow", "from": "demo-branch-review", "to": "demo-branch-review-end", "sourcePort": "flow", "targetPort": "input" },
+    { "id": "demo-branch-review-data", "from": "demo-branch-review", "to": "demo-branch-review-end", "sourcePort": "output", "targetPort": "data" }
+  ]
+}

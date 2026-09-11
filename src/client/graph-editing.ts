@@ -1,8 +1,10 @@
-import type { FlowEdge, FlowNode } from './store.ts'
+import type { FlowEdge, FlowNode, FlowSubflow } from './store.ts'
 
 export interface GraphSnapshot {
   nodes: FlowNode[]
   edges: FlowEdge[]
+  subflows?: FlowSubflow[]
+  rootGraphSnapshot?: GraphSnapshot | undefined
 }
 
 export interface GraphHistory {

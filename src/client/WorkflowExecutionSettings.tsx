@@ -26,7 +26,7 @@ export function JsonObjectSetting({ label, value, onChange, validate }: {
 }
 
 export function WorkflowExecutionSettings() {
-  const { language } = useRunFlowLocale()
+  const { language, t } = useRunFlowLocale()
   const zh = language === 'zh'
   const execution = useFlowStore(state => state.workflowExecution)
   const setExecution = useFlowStore(state => state.setWorkflowExecution)
@@ -43,6 +43,12 @@ export function WorkflowExecutionSettings() {
   const stepLabel = zh ? '最大步数' : 'Maximum steps'
   return <fieldset className="workflow-execution-settings">
     <legend>{zh ? '图执行' : 'Graph execution'}</legend>
+    <label className="field"><span>{t('executionSemantics')}</span><select aria-label={t('executionSemantics')} value={execution?.semantics ?? 'legacy'} onChange={event => {
+      const next = { mode, ...execution }
+      if (event.target.value === 'blueprint') next.semantics = 'blueprint'
+      else delete next.semantics
+      setExecution(next); setError(undefined)
+    }}><option value="blueprint">{t('blueprintSemantics')}</option><option value="legacy">{t('legacySemantics')}</option></select><small>{execution?.semantics === 'blueprint' ? t('blueprintSemanticsHint') : t('legacySemanticsHint')}</small></label>
     <label className="field"><span>{modeLabel}</span><select aria-label={modeLabel} value={mode} onChange={event => {
       const next = event.target.value as typeof mode
       const definition = useFlowStore.getState().definition()

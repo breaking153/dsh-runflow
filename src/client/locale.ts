@@ -5,6 +5,17 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 export type RunFlowLanguage = 'zh' | 'en'
 
 const en = {
+  triggerNode: 'Trigger', pureNode: 'Pure', actionNode: 'Action', executionPins: 'Execution pins', dataPins: 'Data pins',
+  triggerNodeHint: 'Starts an execution flow', pureNodeHint: 'In Blueprint, supplies a value when another node needs it', actionNodeHint: 'In Blueprint, runs when its execution input is called',
+  nodeVisits: '{count} visits', fallbackValue: 'Fallback',
+  executionSemantics: 'Execution semantics', blueprintSemantics: 'Blueprint · flow calls', legacySemantics: 'Legacy · existing behavior',
+  blueprintSemanticsHint: 'Flow wires start operations. Data wires supply values for each call. Each incoming flow runs the operation separately.',
+  legacySemanticsHint: 'Preserves the existing activation rules. Before switching to Blueprint, connect flow wires to the operations that should run.',
+  promoteProperty: 'Promote', restoreProperty: 'Restore', disconnectRestoreProperty: 'Disconnect & restore',
+  propertyConnectedFrom: 'From {source}', propertyFallbackHint: 'Editable fallback · used when no value arrives.',
+  propertyExpectedArray: 'Use a JSON array.', propertyExpectedObject: 'Use a JSON object.', propertyInvalidJson: 'Invalid JSON: {error}',
+  propertyPromotionConflict: 'Restore {property} before promoting this property.', propertyMetadataUnavailable: 'Property metadata is unavailable. Reload the provider or restore this property.',
+  propertyPinUnavailable: 'Property metadata unavailable',
   workflowTemplates: 'Workflow templates', templateIntro: 'Reusable RunFlow graph fragments',
   templateName: 'Template name', saveSelection: 'Save selection', selectTemplateNodes: 'Select one or more nodes first.',
   templateContents: '{nodes} nodes · {edges} internal links', searchTemplates: 'Search templates', insertTemplate: 'Insert',
@@ -54,6 +65,17 @@ const en = {
 } as const
 
 const zh: Record<keyof typeof en, string> = {
+  triggerNode: '触发器', pureNode: '纯计算', actionNode: '操作', executionPins: '执行引脚', dataPins: '数据引脚',
+  triggerNodeHint: '启动执行流程', pureNodeHint: '在 Blueprint 中，于其他节点需要时提供值', actionNodeHint: '在 Blueprint 中，收到执行输入时运行',
+  nodeVisits: '已调用 {count} 次', fallbackValue: '备用值',
+  executionSemantics: '执行语义', blueprintSemantics: 'Blueprint · 按执行流调用', legacySemantics: '兼容模式 · 保留原有行为',
+  blueprintSemanticsHint: '执行线启动操作，数据线为每次调用提供参数。多条执行线分别调用该操作。',
+  legacySemanticsHint: '保留原有节点激活规则。切换到 Blueprint 前，请为需要运行的操作连接执行线。',
+  promoteProperty: '转为输入', restoreProperty: '还原属性', disconnectRestoreProperty: '断开并还原',
+  propertyConnectedFrom: '来自 {source}', propertyFallbackHint: '备用值可编辑；没有传入值时使用。',
+  propertyExpectedArray: '请使用 JSON 数组。', propertyExpectedObject: '请使用 JSON 对象。', propertyInvalidJson: 'JSON 无效：{error}',
+  propertyPromotionConflict: '请先还原 {property}，再将此属性转为输入。', propertyMetadataUnavailable: '属性定义暂不可用。请重新加载 Provider，或还原此属性。',
+  propertyPinUnavailable: '属性定义暂不可用',
   workflowTemplates: '工作流模板', templateIntro: '可复用的 RunFlow 图形片段',
   templateName: '模板名称', saveSelection: '保存选区', selectTemplateNodes: '请先选择一个或多个节点。',
   templateContents: '{nodes} 个节点 · {edges} 条内部连线', searchTemplates: '搜索模板', insertTemplate: '插入',

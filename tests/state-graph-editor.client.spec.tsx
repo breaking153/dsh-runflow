@@ -38,8 +38,8 @@ describe('state graph editor contracts', () => {
   it('rejects a cycle in DAG mode while accepting it in state graph mode', () => {
     const a = makeNode('a', 'builtin.noop', { x: 0, y: 0 })
     const b = makeNode('b', 'builtin.noop', { x: 200, y: 0 })
-    const edge = { source: 'a', sourceHandle: 'flow', target: 'b', targetHandle: 'flow' }
-    const reverse = { source: 'b', sourceHandle: 'flow', target: 'a', targetHandle: 'flow' }
+    const edge = { source: 'a', sourceHandle: 'output', target: 'b', targetHandle: 'flow' }
+    const reverse = { source: 'b', sourceHandle: 'output', target: 'a', targetHandle: 'flow' }
     const edges = [makeEdge('a', 'b', 'a-b', 'flow', 'flow')]
     expect(normalizeNodeConnection([a, b], reverse, { mode: 'dag', edges })).toBeUndefined()
     expect(normalizeNodeConnection([a, b], reverse, { mode: 'state-graph', edges })).toEqual(reverse)
@@ -48,7 +48,7 @@ describe('state graph editor contracts', () => {
 
   it('permits a type-compatible self-loop only in state graph mode', () => {
     const a = makeNode('a', 'builtin.noop', { x: 0, y: 0 })
-    const edge = { source: 'a', sourceHandle: 'flow', target: 'a', targetHandle: 'flow' }
+    const edge = { source: 'a', sourceHandle: 'output', target: 'a', targetHandle: 'flow' }
     expect(normalizeNodeConnection([a], edge, { mode: 'dag', edges: [] })).toBeUndefined()
     expect(normalizeNodeConnection([a], edge, { mode: 'state-graph', edges: [] })).toEqual(edge)
   })

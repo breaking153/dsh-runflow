@@ -63,7 +63,10 @@ describe('dsh-runflow Cordis composition', () => {
 
     expect(ctx.flow.listNodes()).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'dsh.agent', available: true }),
-      expect.objectContaining({ type: 'script.javascript', available: true }),
+      expect.objectContaining({ type: 'script.javascript', available: true, executionKind: 'effect', completionPort: 'flow',
+        inputs: [{ id: 'input', label: 'flow', type: 'flow' }, { id: 'json', label: 'json', type: 'json' }, { id: 'text', label: 'text', type: 'text' }],
+        outputs: [{ id: 'output', label: 'json', type: 'json' }, { id: 'text', label: 'text', type: 'text' }, { id: 'flow', label: 'flow', type: 'flow' }],
+      }),
     ]))
     expect(ctx.flowScript.channel.list()).toEqual([])
 

@@ -1,4 +1,6 @@
 import { create } from 'zustand'
+import { configurableProperties, promotedPortId } from '../node-properties.ts'
+import { conflictingProperty, projectNodeDescriptor, type EditorPortDescriptor } from './property-ports.ts'
 import type { RunFlowStartReceipt } from '../remote-contract.ts'
 import type { RunFlowGatewayV2, RunFlowClientContext } from './application/runflow-gateway.ts'
 import {
@@ -39,7 +41,10 @@ export interface FlowNodeData extends Record<string, unknown> {
   icon: string
   status: NodeExecutionStatus
   config: JsonObject
-  inputs: WorkflowPortDescriptor[]
+  promotedInputs?: string[]
+  executionKind?: WorkflowNodeDescriptor['executionKind']
+  valueDefault?: JsonValue | undefined
+  inputs: EditorPortDescriptor[]
   outputs: WorkflowPortDescriptor[]
   memberNodeIds?: string[]
   subflowId?: string
@@ -80,8 +85,15 @@ export function makeEdge(source: string, target: string, id = source + '-' + tar
   }
 }
 
-export function makeNode(id: string, type: string, position: { x: number; y: number }, config: JsonObject = {}, name?: string, descriptorOverride?: WorkflowNodeDescriptor): FlowNode {
-  const descriptor = descriptorOverride ?? descriptorFor(type)
+function nodePresentation(descriptor: WorkflowNodeDescriptor): Pick<FlowNodeData, 'executionKind' | 'valueDefault'> {
+  return {
+    executionKind: descriptor.executionKind ?? (descriptor.category === 'trigger' ? 'trigger' : 'effect'),
+    valueDefault: descriptor.type.startsWith('value.') ? configurableProperties(descriptor).find(property => property.key === 'value')?.schema.default : undefined,
+  }
+}
+
+export function makeNode(id: string, type: string, position: { x: number; y: number }, config: JsonObject = {}, name?: string, descriptorOverride?: WorkflowNodeDescriptor, promotedInputs?: string[]): FlowNode {
+  const descriptor = projectNodeDescriptor(promotedInputs === undefined ? {} : { promotedInputs }, descriptorOverride ?? descriptorFor(type))
   return {
     id, type: 'workflow', position,
     data: {
@@ -93,6 +105,8 @@ export function makeNode(id: string, type: string, position: { x: number; y: num
       icon: descriptor.icon,
       status: 'WAITING',
       config,
+      ...nodePresentation(descriptor),
+      ...(promotedInputs === undefined ? {} : { promotedInputs: [...promotedInputs] }),
       inputs: structuredClone(descriptor.inputs ?? [DEFAULT_INPUT]),
       outputs: structuredClone(descriptor.outputs ?? [DEFAULT_OUTPUT]),
     },
@@ -146,16 +160,20 @@ function defaultDefinition(): WorkflowDefinition {
     id: 'pr-review-pipeline',
     name: 'PR Review Pipeline',
     version: 1,
-    execution: { mode: 'state-graph', maxSteps: 100 },
+    execution: { mode: 'state-graph', semantics: 'blueprint', maxSteps: 100 },
     nodes: [
       { id: 'manual', type: 'trigger.manual', name: 'Manual Trigger', config: {}, position: { x: 80, y: 220 } },
+      { id: 'payload', type: 'value.json', name: 'Review input', config: { value: { items: [{ title: 'Example pull request' }] } }, position: { x: 80, y: 390 } },
       { id: 'script', type: 'script.javascript', name: 'JavaScript', config: { code: 'const total = input.items?.length ?? 0\nreturn { ...input, total }', timeoutMs: 5000 }, position: { x: 390, y: 220 } },
       { id: 'agent', type: 'dsh.agent', name: 'DSH Agent', config: { subagentProvider: 'spawn', prompt: 'Review the incoming pull request', maxDepth: 2 }, position: { x: 700, y: 220 } },
       { id: 'storage', type: 'storage.write', name: 'Storage', config: { collection: 'review-results' }, position: { x: 1010, y: 220 } },
     ],
     edges: [
       { id: 'manual-script', from: 'manual', to: 'script', sourcePort: 'output', targetPort: 'input' },
+      { id: 'payload-script', from: 'payload', to: 'script', sourcePort: 'value', targetPort: 'json' },
+      { id: 'script-agent-flow', from: 'script', to: 'agent', sourcePort: 'flow', targetPort: 'flow' },
       { id: 'script-agent', from: 'script', to: 'agent', sourcePort: 'output', targetPort: 'input' },
+      { id: 'agent-storage-flow', from: 'agent', to: 'storage', sourcePort: 'flow', targetPort: 'flow' },
       { id: 'agent-storage', from: 'agent', to: 'storage', sourcePort: 'result', targetPort: 'input' },
     ],
   }
@@ -208,14 +226,19 @@ function scheduleAutosave(): void {
   }, 300)
 }
 
+function defaultPortId(node: FlowNode, direction: 'input' | 'output'): string | undefined {
+  if (node.data.inputs.some(port => port.unavailable)) return undefined
+  return (direction === 'input' ? node.data.inputs : node.data.outputs)[0]?.id
+}
+
 function graphOf(definition: WorkflowDefinition): { nodes: FlowNode[]; edges: FlowEdge[]; subflows: FlowSubflow[] } {
   const storedSubflows = definition.ui?.subflows ?? []
   const internalIds = new Set(storedSubflows.flatMap(subflow => subflow.nodes.map(node => node.id)))
   const workflowNodes = definition.nodes.filter(node => !internalIds.has(node.id)).map((node, index) => makeNode(
-    node.id, node.type, node.position ?? { x: 80 + index * 300, y: 220 }, node.config, node.name,
+    node.id, node.type, node.position ?? { x: 80 + index * 300, y: 220 }, node.config, node.name, undefined, node.promotedInputs,
   ))
   const subflows: FlowSubflow[] = storedSubflows.map(subflow => {
-    const workflowNodes = subflow.nodes.map((node, index) => makeNode(node.id, node.type, node.position ?? { x: 80 + index * 300, y: 220 }, node.config, node.name))
+    const workflowNodes = subflow.nodes.map((node, index) => makeNode(node.id, node.type, node.position ?? { x: 80 + index * 300, y: 220 }, node.config, node.name, undefined, node.promotedInputs))
     const groups = (subflow.groups ?? []).map(group => makeGroupNode(group.id, group.label, group.position, group.width, group.height, group.nodeIds))
     const reroutes = (subflow.reroutes ?? []).map(reroute => makeRerouteNode(reroute.id, reroute.position))
     const nodes = [...groups, ...workflowNodes, ...reroutes]
@@ -226,7 +249,7 @@ function graphOf(definition: WorkflowDefinition): { nodes: FlowNode[]; edges: Fl
     const edges = storedEdges.flatMap((edge, index) => {
       const source = nodeMap.get(edge.from); const target = nodeMap.get(edge.to)
       if (source === undefined || target === undefined) return []
-      return [makeEdge(edge.from, edge.to, edge.id ?? `${subflow.id}-edge-${index}`, edge.sourcePort ?? source.data.outputs[0]?.id, edge.targetPort ?? target.data.inputs[0]?.id)]
+      return [makeEdge(edge.from, edge.to, edge.id ?? `${subflow.id}-edge-${index}`, edge.sourcePort ?? defaultPortId(source, 'output'), edge.targetPort ?? defaultPortId(target, 'input'))]
     })
     return { id: subflow.id, label: subflow.label, position: subflow.position, nodes, edges, inputs: subflow.inputs, outputs: subflow.outputs }
   })
@@ -242,7 +265,7 @@ function graphOf(definition: WorkflowDefinition): { nodes: FlowNode[]; edges: Fl
     const source = map.get(edge.from)
     const target = map.get(edge.to)
     if (source === undefined || target === undefined) return []
-    return [makeEdge(edge.from, edge.to, edge.id ?? 'edge-' + index, edge.sourcePort ?? source.data.outputs[0]?.id, edge.targetPort ?? target.data.inputs[0]?.id)]
+    return [makeEdge(edge.from, edge.to, edge.id ?? 'edge-' + index, edge.sourcePort ?? defaultPortId(source, 'output'), edge.targetPort ?? defaultPortId(target, 'input'))]
   })
   return { nodes, edges, subflows }
 }
@@ -292,6 +315,7 @@ function storedNodes(nodes: FlowNode[]) {
   return nodes.filter(node => node.type === 'workflow').map(node => ({
     id: node.id, type: node.data.nodeType, name: node.data.label,
     config: node.data.config, position: node.position,
+    ...(node.data.promotedInputs === undefined ? {} : { promotedInputs: node.data.promotedInputs }),
   }))
 }
 
@@ -522,6 +546,7 @@ export interface FlowState extends ReviewSlice {
   addNode(descriptor: WorkflowNodeDescriptor, position?: { x: number; y: number }): string
   addConnectedNode(descriptor: WorkflowNodeDescriptor, position: { x: number; y: number }, connection: PendingNodeConnection): string
   updateNode(id: string, patch: Partial<Pick<FlowNodeData, 'label' | 'config'>>): void
+  setPropertyPromoted(id: string, key: string, promoted: boolean): void
   removeNode(id: string): void
   duplicateNode(id: string): void
   setWorkflowName(name: string): void
@@ -604,11 +629,32 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       if (!isCurrent()) return
       const nodeCatalog = setHostNodeCatalog(workspace.nodes)
       set(state => {
+        const refreshPorts = (nodes: FlowNode[]): FlowNode[] => nodes.map(node => {
+          if (node.type !== 'workflow') return node
+          const descriptor = projectNodeDescriptor(node.data, nodeCatalog.find(item => item.type === node.data.nodeType) ?? descriptorFor(node.data.nodeType))
+          return { ...node, data: { ...node.data, ...nodePresentation(descriptor), inputs: descriptor.inputs ?? [DEFAULT_INPUT], outputs: descriptor.outputs ?? [DEFAULT_OUTPUT] } }
+        })
+        const refreshGraph = (graph: GraphSnapshot): GraphSnapshot => {
+          const nodes = refreshPorts(graph.nodes)
+          const edges = graph.edges.map(edge => {
+            const source = nodes.find(node => node.id === edge.source)
+            const target = nodes.find(node => node.id === edge.target)
+            const sourceHandle = edge.sourceHandle ?? (source === undefined ? undefined : defaultPortId(source, 'output'))
+            const targetHandle = edge.targetHandle ?? (target === undefined ? undefined : defaultPortId(target, 'input'))
+            return { ...edge, ...(sourceHandle === undefined ? {} : { sourceHandle }), ...(targetHandle === undefined ? {} : { targetHandle }) }
+          })
+          return { ...graph, nodes, edges,
+            ...(graph.subflows === undefined ? {} : { subflows: graph.subflows.map(subflow => ({ ...subflow, ...refreshGraph(subflow) })) }),
+            ...(graph.rootGraphSnapshot === undefined ? {} : { rootGraphSnapshot: refreshGraph(graph.rootGraphSnapshot) }),
+          }
+        }
         let workflows = workspace.workflows.length === 0 ? state.workflows : workspace.workflows
         for (const pending of state.workflowDrafts.values()) workflows = replaceWorkflow(workflows, pending.definition)
         if (state.dirty) workflows = replaceWorkflow(workflows, definitionOf(state))
         return {
           workflows, executions: workspace.executions, nodeCatalog,
+          ...refreshGraph({ nodes: state.nodes, edges: state.edges, subflows: state.subflows, rootGraphSnapshot: state.rootGraphSnapshot }),
+          graphHistory: { ...state.graphHistory, past: state.graphHistory.past.map(refreshGraph), future: state.graphHistory.future.map(refreshGraph) },
           subagentProviders: workspace.subagentProviders,
           capabilities: workspace.capabilities, workspaceLoading: false,
         }
@@ -624,7 +670,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     const id = 'workflow-' + Date.now().toString(36)
     const definition: WorkflowDefinition = {
       id, name: 'My workflow', version: 1,
-      execution: { mode: 'state-graph', maxSteps: 100 },
+      execution: { mode: 'state-graph', semantics: 'blueprint', maxSteps: 100 },
       nodes: [{ id: 'manual-' + Date.now().toString(36), type: 'trigger.manual', name: 'Manual Trigger', config: {}, position: { x: 180, y: 240 } }],
       edges: [],
     }
@@ -754,7 +800,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   },
   onConnect(connection) {
     const state = get()
-    const normalized = normalizeNodeConnection(state.nodes, connection, { mode: state.workflowExecution?.mode ?? 'dag', edges: state.edges })
+    const normalized = normalizeNodeConnection(state.nodes, connection, { mode: state.workflowExecution?.mode ?? 'dag', semantics: state.workflowExecution?.semantics, edges: state.edges })
     if (normalized === undefined) return
     set(state => ({
       graphHistory: pushGraphHistory(state.graphHistory, { nodes: state.nodes, edges: state.edges }),
@@ -810,7 +856,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   undoGraph() {
     set(state => {
       if (state.graphHistory.past.length === 0) return state
-      const step = undoGraphHistory(state.graphHistory, { nodes: state.nodes, edges: state.edges })
+      const step = undoGraphHistory(state.graphHistory, { nodes: state.nodes, edges: state.edges, subflows: state.subflows, rootGraphSnapshot: state.rootGraphSnapshot })
       return {
         ...step.snapshot,
         graphHistory: step.history,
@@ -824,7 +870,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   redoGraph() {
     set(state => {
       if (state.graphHistory.future.length === 0) return state
-      const step = redoGraphHistory(state.graphHistory, { nodes: state.nodes, edges: state.edges })
+      const step = redoGraphHistory(state.graphHistory, { nodes: state.nodes, edges: state.edges, subflows: state.subflows, rootGraphSnapshot: state.rootGraphSnapshot })
       return {
         ...step.snapshot,
         graphHistory: step.history,
@@ -850,10 +896,12 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       const pasted = pasteGraphFragment(state.graphClipboard, state.nodes, state.edges)
       const pastedNodes = pasted.nodes.map(node => {
         if (node.type !== 'workflow') return node
-        const descriptor = state.nodeCatalog.find(item => item.type === node.data.nodeType)
-        if (descriptor === undefined) return node
+        const rawDescriptor = state.nodeCatalog.find(item => item.type === node.data.nodeType)
+        if (rawDescriptor === undefined) return node
+        const descriptor = projectNodeDescriptor(node.data, rawDescriptor)
         return { ...node, data: {
           ...node.data,
+          ...nodePresentation(descriptor),
           inputs: structuredClone(descriptor.inputs ?? [DEFAULT_INPUT]),
           outputs: structuredClone(descriptor.outputs ?? [DEFAULT_OUTPUT]),
         } }
@@ -1059,7 +1107,9 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   addConnectedNode(descriptor, position, pending) {
     const id = descriptor.type.replaceAll('.', '-') + '-' + Math.random().toString(36).slice(2, 7)
     const created = { ...makeNode(id, descriptor.type, position, {}, undefined, descriptor), selected: true }
-    const connection = connectionForNewNode(pending, descriptor, id)
+    const candidate = connectionForNewNode(pending, descriptor, id)
+    const current = get()
+    const connection = candidate === undefined ? undefined : normalizeNodeConnection([...current.nodes, created], candidate, { mode: current.workflowExecution?.mode ?? 'dag', semantics: current.workflowExecution?.semantics, edges: current.edges })
     set(state => ({
       graphHistory: pushGraphHistory(state.graphHistory, { nodes: state.nodes, edges: state.edges }),
       nodes: [...state.nodes.map(node => ({ ...node, selected: false })), created],
@@ -1082,6 +1132,37 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       nodes: state.nodes.map(node => node.id === id ? { ...node, data: { ...node.data, ...patch } } : node),
       ...editedDraft(state),
     }))
+    scheduleAutosave()
+  },
+  setPropertyPromoted(id, key, promoted) {
+    set(state => {
+      const node = state.nodes.find(node => node.id === id && node.type === 'workflow')
+      if (node === undefined) return state
+      const descriptor = state.nodeCatalog.find(item => item.type === node.data.nodeType) ?? descriptorFor(node.data.nodeType)
+      if (promoted && !configurableProperties(descriptor).some(property => property.key === key)) return state
+      if (promoted && conflictingProperty(node.data.promotedInputs ?? [], key) !== undefined) return state
+      if ((node.data.promotedInputs?.includes(key) === true) === promoted) return state
+      const promotedInputs = promoted ? [...(node.data.promotedInputs ?? []), key] : (node.data.promotedInputs ?? []).filter(item => item !== key)
+      const data = { ...node.data, promotedInputs }
+      const effective = projectNodeDescriptor(data, descriptor)
+      const portId = promotedPortId(key)
+      const subflow = state.subflows.find(item => item.id === state.activeSubflowId)
+      const removedBoundaryPorts = new Set(promoted ? [] : (subflow?.inputs ?? []).filter(input => input.nodeId === id && input.nodePortId === portId).map(input => input.id))
+      const inputs = subflow?.inputs.filter(input => !removedBoundaryPorts.has(input.id))
+      const rootGraphSnapshot = state.rootGraphSnapshot === undefined ? undefined : {
+        ...state.rootGraphSnapshot,
+        nodes: state.rootGraphSnapshot.nodes.map(item => item.id === subflow?.id && inputs !== undefined ? { ...item, data: { ...item.data, inputs: inputs.map(input => ({ id: input.id, label: input.label, type: input.type, required: true })) } } : item),
+        edges: state.rootGraphSnapshot.edges.filter(edge => edge.target !== subflow?.id || !removedBoundaryPorts.has(edge.targetHandle ?? '')),
+      }
+      return {
+        graphHistory: pushGraphHistory(state.graphHistory, { nodes: state.nodes, edges: state.edges, subflows: state.subflows, rootGraphSnapshot: state.rootGraphSnapshot }),
+        nodes: state.nodes.map(item => item.id === id ? { ...item, data: { ...data, inputs: effective.inputs ?? [DEFAULT_INPUT], outputs: effective.outputs ?? [DEFAULT_OUTPUT] } } : item),
+        edges: promoted ? state.edges : state.edges.filter(edge => edge.target !== id || edge.targetHandle !== portId),
+        subflows: inputs === undefined ? state.subflows : state.subflows.map(item => item.id === subflow?.id ? { ...item, inputs } : item),
+        rootGraphSnapshot,
+        ...editedDraft(state),
+      }
+    })
     scheduleAutosave()
   },
   removeNode(id) {

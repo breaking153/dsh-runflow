@@ -1,0 +1,245 @@
+{
+  "capturedAt": "2026-09-11T04:33:38.797Z",
+  "hostVersion": "0.1.5-rc.1",
+  "interaction": "Real DSH Web UI starts and resumes; read-only Host execution and Storage artifact assertions",
+  "runCount": 9,
+  "failedAssertions": 0,
+  "coverage": [
+    "branch-approved",
+    "branch-review",
+    "data",
+    "data-desc",
+    "http-503",
+    "http-two-calls",
+    "loop-false",
+    "loop-paused",
+    "loop-true"
+  ],
+  "missingCoverage": [],
+  "pauseObservations": [
+    {
+      "executionId": "f4cbe11f-9c3a-4a8b-8c4b-8d56d7beac01",
+      "capturedAt": "2026-09-11T04:20:17.758Z",
+      "status": "PAUSED",
+      "state": {
+        "count": 3
+      },
+      "pausedStep": 9
+    }
+  ],
+  "runs": [
+    {
+      "executionId": "b600a3a0-6964-4060-8bf9-ec04817f25f4",
+      "workflowId": "demo-shared-http",
+      "status": "SUCCESS",
+      "verification": "PASS",
+      "variant": {
+        "endpoint": "http://127.0.0.1:18947/echo",
+        "startedTriggers": [
+          "demo-http-start-a",
+          "demo-http-start-b"
+        ],
+        "sharedCallCount": 2
+      },
+      "counts": {
+        "demo-http-start-a": 1,
+        "demo-http-start-b": 1,
+        "demo-http-url": 2,
+        "demo-http-body": 2,
+        "demo-http-request": 2,
+        "demo-http-storage": 2,
+        "demo-http-continue": 2,
+        "demo-http-end": 2
+      },
+      "startedAt": "2026-09-11T04:33:33.629Z",
+      "finishedAt": "2026-09-11T04:33:35.577Z"
+    },
+    {
+      "executionId": "2fc0a112-84a4-4263-8e9e-a57f9b38c36c",
+      "workflowId": "demo-loop-approval",
+      "status": "SUCCESS",
+      "verification": "PASS",
+      "variant": {
+        "count": 3,
+        "pausedStep": 9,
+        "approved": false
+      },
+      "counts": {
+        "demo-loop-start": 1,
+        "demo-loop-counter": 4,
+        "demo-loop-increment": 3,
+        "demo-loop-approval": 1,
+        "demo-loop-result": 1,
+        "demo-loop-end": 1
+      },
+      "startedAt": "2026-09-11T04:21:36.768Z",
+      "finishedAt": "2026-09-11T04:21:52.988Z"
+    },
+    {
+      "executionId": "f4cbe11f-9c3a-4a8b-8c4b-8d56d7beac01",
+      "workflowId": "demo-loop-approval",
+      "status": "SUCCESS",
+      "verification": "PASS",
+      "variant": {
+        "count": 3,
+        "pausedStep": 9,
+        "approved": true
+      },
+      "counts": {
+        "demo-loop-start": 1,
+        "demo-loop-counter": 4,
+        "demo-loop-increment": 3,
+        "demo-loop-approval": 1,
+        "demo-loop-result": 1,
+        "demo-loop-end": 1
+      },
+      "startedAt": "2026-09-11T04:20:07.986Z",
+      "finishedAt": "2026-09-11T04:21:22.839Z"
+    },
+    {
+      "executionId": "0e904080-9f7e-4d7f-98d3-459d8873515c",
+      "workflowId": "demo-shared-http",
+      "status": "SUCCESS",
+      "verification": "PASS",
+      "variant": {
+        "endpoint": "http://127.0.0.1:18947/echo",
+        "startedTriggers": [
+          "demo-http-start-a",
+          "demo-http-start-b"
+        ],
+        "sharedCallCount": 2
+      },
+      "counts": {
+        "demo-http-start-a": 1,
+        "demo-http-start-b": 1,
+        "demo-http-url": 2,
+        "demo-http-body": 2,
+        "demo-http-request": 2,
+        "demo-http-storage": 2,
+        "demo-http-continue": 2,
+        "demo-http-end": 2
+      },
+      "startedAt": "2026-09-11T04:19:25.657Z",
+      "finishedAt": "2026-09-11T04:19:26.233Z"
+    },
+    {
+      "executionId": "bb0653ef-eaca-4069-8423-1dceccc58a53",
+      "workflowId": "demo-shared-http",
+      "status": "FAILED",
+      "verification": "PASS",
+      "variant": {
+        "endpoint": "http://127.0.0.1:18947/fail",
+        "startedTriggers": [
+          "demo-http-start-a",
+          "demo-http-start-b"
+        ],
+        "sharedCallCount": 0
+      },
+      "counts": {
+        "demo-http-start-a": 1,
+        "demo-http-start-b": 1,
+        "demo-http-url": 0,
+        "demo-http-body": 0,
+        "demo-http-request": 0,
+        "demo-http-storage": 0,
+        "demo-http-continue": 0,
+        "demo-http-end": 0
+      },
+      "startedAt": "2026-09-11T04:19:17.765Z",
+      "finishedAt": "2026-09-11T04:19:17.949Z"
+    },
+    {
+      "executionId": "5ca07a17-4528-4ef5-a107-30d128f7f58b",
+      "workflowId": "demo-shared-http",
+      "status": "SUCCESS",
+      "verification": "PASS",
+      "variant": {
+        "endpoint": "http://127.0.0.1:18947/echo",
+        "startedTriggers": [
+          "demo-http-start-a",
+          "demo-http-start-b"
+        ],
+        "sharedCallCount": 2
+      },
+      "counts": {
+        "demo-http-start-a": 1,
+        "demo-http-start-b": 1,
+        "demo-http-url": 2,
+        "demo-http-body": 2,
+        "demo-http-request": 2,
+        "demo-http-storage": 2,
+        "demo-http-continue": 2,
+        "demo-http-end": 2
+      },
+      "startedAt": "2026-09-11T04:17:10.226Z",
+      "finishedAt": "2026-09-11T04:17:10.829Z"
+    },
+    {
+      "executionId": "2af24b97-ab05-4884-90ef-482d27710464",
+      "workflowId": "demo-conditional-branch",
+      "status": "SUCCESS",
+      "verification": "PASS",
+      "variant": {
+        "allowed": false,
+        "selected": "review"
+      },
+      "counts": {
+        "demo-branch-start": 1,
+        "demo-branch-flag": 1,
+        "demo-branch-check": 1,
+        "demo-branch-approved": 0,
+        "demo-branch-review": 1,
+        "demo-branch-approved-end": 0,
+        "demo-branch-review-end": 1
+      },
+      "startedAt": "2026-09-11T04:16:13.914Z",
+      "finishedAt": "2026-09-11T04:16:14.129Z"
+    },
+    {
+      "executionId": "b18fcac0-8696-4898-a6bc-7b9f86d3edfd",
+      "workflowId": "demo-conditional-branch",
+      "status": "SUCCESS",
+      "verification": "PASS",
+      "variant": {
+        "allowed": true,
+        "selected": "approved"
+      },
+      "counts": {
+        "demo-branch-start": 1,
+        "demo-branch-flag": 1,
+        "demo-branch-check": 1,
+        "demo-branch-approved": 1,
+        "demo-branch-review": 0,
+        "demo-branch-approved-end": 1,
+        "demo-branch-review-end": 0
+      },
+      "startedAt": "2026-09-11T04:15:55.858Z",
+      "finishedAt": "2026-09-11T04:15:56.055Z"
+    },
+    {
+      "executionId": "4f1ee3ac-65c4-4e6c-9fb8-09d1b7f98277",
+      "workflowId": "demo-data-pipeline",
+      "status": "SUCCESS",
+      "verification": "PASS",
+      "variant": {
+        "sortOrder": "desc",
+        "maxItems": 2,
+        "expectedIds": [
+          "RF-103",
+          "RF-101"
+        ]
+      },
+      "counts": {
+        "demo-data-start": 1,
+        "demo-data-source": 1,
+        "demo-data-filter": 1,
+        "demo-data-sort": 1,
+        "demo-data-limit": 1,
+        "demo-data-storage": 1,
+        "demo-data-end": 1
+      },
+      "startedAt": "2026-09-11T04:15:18.682Z",
+      "finishedAt": "2026-09-11T04:15:18.951Z"
+    }
+  ]
+}

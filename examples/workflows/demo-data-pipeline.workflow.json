@@ -1,0 +1,30 @@
+{
+  "id": "demo-data-pipeline",
+  "name": "Demo 01 · 筛选高分记录 / Top records",
+  "version": 1,
+  "execution": { "mode": "state-graph", "semantics": "blueprint", "maxSteps": 20 },
+  "nodes": [
+    { "id": "demo-data-start", "type": "trigger.manual", "name": "开始 / Start", "config": {}, "position": { "x": 40, "y": 80 } },
+    { "id": "demo-data-source", "type": "value.json", "name": "任务清单 / Records", "config": { "value": [
+      { "id": "RF-101", "title": "Improve search", "active": true, "score": 91 },
+      { "id": "RF-102", "title": "Update archive", "active": false, "score": 99 },
+      { "id": "RF-103", "title": "Repair export", "active": true, "score": 97 },
+      { "id": "RF-104", "title": "Polish settings", "active": true, "score": 83 },
+      { "id": "RF-105", "title": "Retire endpoint", "active": false, "score": 88 }
+    ] }, "position": { "x": 40, "y": 330 } },
+    { "id": "demo-data-filter", "type": "builtin.filter", "name": "保留有效项 / Filter", "config": { "path": "active", "operator": "equals", "value": true }, "position": { "x": 360, "y": 330 } },
+    { "id": "demo-data-sort", "type": "builtin.sort", "name": "分数降序 / Sort", "config": { "path": "score", "order": "desc" }, "position": { "x": 680, "y": 330 } },
+    { "id": "demo-data-limit", "type": "builtin.limit", "name": "取前两项 / Top 2", "config": { "maxItems": 2 }, "position": { "x": 1000, "y": 330 } },
+    { "id": "demo-data-storage", "type": "storage.write", "name": "保存结果 / Storage", "config": { "collection": "demo-top-items" }, "position": { "x": 1000, "y": 80 } },
+    { "id": "demo-data-end", "type": "control.end", "name": "返回回执 / Result", "config": {}, "position": { "x": 1320, "y": 80 } }
+  ],
+  "edges": [
+    { "id": "demo-data-start-storage", "from": "demo-data-start", "to": "demo-data-storage", "sourcePort": "output", "targetPort": "flow" },
+    { "id": "demo-data-source-filter", "from": "demo-data-source", "to": "demo-data-filter", "sourcePort": "value", "targetPort": "json" },
+    { "id": "demo-data-filter-sort", "from": "demo-data-filter", "to": "demo-data-sort", "sourcePort": "json", "targetPort": "json" },
+    { "id": "demo-data-sort-limit", "from": "demo-data-sort", "to": "demo-data-limit", "sourcePort": "json", "targetPort": "json" },
+    { "id": "demo-data-limit-storage", "from": "demo-data-limit", "to": "demo-data-storage", "sourcePort": "json", "targetPort": "input" },
+    { "id": "demo-data-storage-end-flow", "from": "demo-data-storage", "to": "demo-data-end", "sourcePort": "flow", "targetPort": "input" },
+    { "id": "demo-data-storage-end-data", "from": "demo-data-storage", "to": "demo-data-end", "sourcePort": "output", "targetPort": "data" }
+  ]
+}

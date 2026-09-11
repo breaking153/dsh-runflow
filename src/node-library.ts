@@ -18,6 +18,7 @@ import type {
   WorkflowNodeDescriptor,
 } from './contracts.ts'
 import { writeAtomicJson, writeAtomicJsonSync } from './backend/v2/atomic-json.ts'
+import { validateExecutionDescriptor } from './node-execution.ts'
 
 export type NodeLibrarySource = 'builtin' | 'plugin' | 'memory' | 'local'
 
@@ -82,6 +83,7 @@ function revisionOf(input: NodeDraftInput): string {
 
 function validateDraft(input: NodeDraftInput): void {
   const descriptor = input.descriptor
+  validateExecutionDescriptor(descriptor)
   if (!TYPE_PATTERN.test(descriptor.type)) {
     throw new Error('node type must be a namespaced lowercase id such as custom.extract-text')
   }
@@ -157,6 +159,7 @@ export class FlowNodeLibrary {
   }
 
   registerBuiltin(definition: WorkflowNodeDefinition): void {
+    validateExecutionDescriptor(definition)
     const existing = this.records.get(definition.type)
     if (existing?.source === 'local' || existing?.source === 'memory') {
       this.warn('RunFlow ignored local node that collides with builtin ' + definition.type)
@@ -309,6 +312,7 @@ export class FlowNodeLibrary {
   }
 
   private registerStable(definition: WorkflowNodeDefinition, source: 'builtin' | 'plugin'): void {
+    validateExecutionDescriptor(definition)
     if (this.records.has(definition.type)) throw new Error('flow: duplicate node provider ' + definition.type)
     this.records.set(definition.type, { descriptor: descriptorFromDefinition(definition), definition, source })
   }

@@ -30,7 +30,7 @@ flowchart LR
 
 ## 选择执行模式与入口
 
-在工作流顶部 **运行设置 / Run settings → 图执行 / Graph execution** 中选择模式。没有 `execution` 字段或使用 `mode: "dag"` 的定义继续按旧 DAG 执行，无需迁移。状态图允许循环；带循环的图必须先移除循环连线才能切回 DAG。
+在工作流顶部 **运行设置 / Run settings → 图执行 / Graph execution** 中分别选择执行语义和模式。未声明 `semantics` 的旧定义保留原有调度；新工作流默认 `semantics: "blueprint"`，通过执行线启动操作、按需计算纯数据。`mode: "dag"` 始终禁止循环；状态图允许有限循环。带循环的图必须先移除循环连线才能切回 DAG。参见 [Blueprint 节点与属性输入](./BLUEPRINT_EXECUTION_GUIDE.md)。
 
 下面是 Workflow 中的配置片段，`entryNodeIds` 使用画布中的节点 ID：
 
@@ -49,7 +49,7 @@ flowchart LR
 | 设置 | 语义 |
 | --- | --- |
 | `maxSteps` | 默认 100，必须是 1–1000 的整数。每轮就绪节点共同算一步；并非节点总数，也不是单个 Loop 的迭代数 |
-| `entryNodeIds` | 图结构入口；不填写时使用无入边节点。纯循环需要显式入口，所有节点必须从结构入口可达 |
+| `entryNodeIds` | 图结构入口；兼容模式不填写时使用无入边节点。Blueprint 模式从执行入口启动操作，纯数据依赖按需计算。纯循环需要显式入口 |
 | `initialState` | 初始 JSON 对象。请求的业务 `input` 不会自动覆盖初始状态，可用 `state.update` 显式写入 |
 | `reducers` | 按顶层状态键选择归约规则；未声明的键使用 `replace` |
 

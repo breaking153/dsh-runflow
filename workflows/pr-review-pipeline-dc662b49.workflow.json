@@ -2,7 +2,15 @@
   "id": "pr-review-pipeline",
   "name": "PR Review Pipeline - Host Demo",
   "version": 1,
+  "execution": { "mode": "state-graph", "semantics": "blueprint", "maxSteps": 100 },
   "nodes": [
+    {
+      "id": "payload",
+      "type": "value.json",
+      "name": "Review input",
+      "config": { "value": { "items": [{ "title": "Example pull request" }] } },
+      "position": { "x": 80, "y": 390 }
+    },
     {
       "id": "manual",
       "type": "trigger.manual",
@@ -54,6 +62,9 @@
     }
   ],
   "edges": [
+    { "id": "payload-script", "from": "payload", "to": "script", "sourcePort": "value", "targetPort": "json" },
+    { "id": "script-agent-flow", "from": "script", "to": "agent", "sourcePort": "flow", "targetPort": "flow" },
+    { "id": "agent-storage-flow", "from": "agent", "to": "storage", "sourcePort": "flow", "targetPort": "flow" },
     {
       "id": "manual-script",
       "from": "manual",

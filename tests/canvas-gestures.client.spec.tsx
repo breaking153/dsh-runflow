@@ -6,17 +6,72 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { ReactFlowProps } from '@xyflow/react'
 import { FlowApp } from '../src/client/App.tsx'
 import { makeNode, useFlowStore, type FlowNode } from '../src/client/store.ts'
-const captured = vi.hoisted(() => ({ props: {} as ReactFlowProps<FlowNode> }))
-vi.mock('@xyflow/react', async original => ({ ...await original<typeof import('@xyflow/react')>(), ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>, ReactFlow: (props: ReactFlowProps<FlowNode>) => { captured.props = props; return <div className="react-flow__pane">{props.children}</div> }, Background: () => null, MiniMap: () => null, Controls: () => null, useReactFlow: () => ({ screenToFlowPosition: (point: unknown) => point, fitView: vi.fn(), zoomIn: vi.fn(), zoomOut: vi.fn() }) }))
+import { descriptorFor } from '../src/client/catalog.tsx'
+const captured = vi.hoisted(() => ({ props: {} as ReactFlowProps<FlowNode>, fitView: vi.fn(async () => true), nodesInitialized: true, viewportInitialized: true }))
+vi.mock('@xyflow/react', async original => ({ ...await original<typeof import('@xyflow/react')>(), ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>, ReactFlow: (props: ReactFlowProps<FlowNode>) => { captured.props = props; return <div className="react-flow__pane">{props.children}</div> }, Background: () => null, MiniMap: () => null, Controls: () => null, useNodesInitialized: () => captured.nodesInitialized, useReactFlow: () => ({ screenToFlowPosition: (point: unknown) => point, fitView: captured.fitView, viewportInitialized: captured.viewportInitialized, zoomIn: vi.fn(), zoomOut: vi.fn() }) }))
 vi.mock('../src/client/InspectorPanel.tsx', () => ({ InspectorPanel: () => <div>Inspector</div> }))
 let host: HTMLDivElement; let root: Root
 beforeEach(() => {
   ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   vi.useFakeTimers(); useFlowStore.setState(useFlowStore.getInitialState(), true)
+  captured.fitView.mockClear()
+  captured.nodesInitialized = true; captured.viewportInitialized = true
   useFlowStore.setState({ view: 'editor', nodes: [makeNode('a', 'builtin.noop', { x: 0, y: 0 }), makeNode('b', 'builtin.noop', { x: 200, y: 0 })], edges: [], selectedNodeId: undefined, dirty: false })
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
 })
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.clearAllTimers(); vi.useRealTimers() })
+it('fits a fresh editor only after every node and the viewport are initialized', async () => {
+  captured.nodesInitialized = false; captured.viewportInitialized = false
+  await act(async () => root.render(<FlowApp />))
+  await act(async () => vi.advanceTimersByTimeAsync(50))
+  expect(captured.props.fitView).not.toBe(true)
+  expect(captured.fitView).not.toHaveBeenCalled()
+  captured.nodesInitialized = true
+  await act(async () => root.render(<FlowApp />))
+  await act(async () => vi.advanceTimersByTimeAsync(50))
+  expect(captured.fitView).not.toHaveBeenCalled()
+  captured.viewportInitialized = true
+  await act(async () => root.render(<FlowApp />))
+  await act(async () => vi.advanceTimersByTimeAsync(50))
+  expect(captured.fitView).toHaveBeenCalledTimes(1)
+})
+it('keeps legacy DAG flow occupancy through validation, release, and node insertion until Blueprint is selected', async () => {
+  const source = makeNode('source', 'trigger.manual', { x: 0, y: 0 })
+  const existing = makeNode('existing', 'trigger.manual', { x: 0, y: 200 })
+  const target = makeNode('target', 'builtin.wait', { x: 300, y: 0 })
+  const candidate = { source: source.id, sourceHandle: 'output', target: target.id, targetHandle: 'flow' }
+  useFlowStore.setState({ workflowExecution: { mode: 'dag' }, nodes: [source, existing, target], edges: [{ id: 'existing-link', ...candidate, source: existing.id }] })
+  await act(async () => root.render(<FlowApp />))
+  expect(captured.props.isValidConnection?.(candidate)).toBe(false)
+  await act(async () => captured.props.onConnect?.(candidate))
+  await act(async () => captured.props.onConnectEnd?.(new MouseEvent('mouseup'), { fromNode: source, fromHandle: { id: 'output', type: 'source' }, toNode: target, toHandle: { id: 'flow', type: 'target' }, isValid: false } as never))
+  expect(host.querySelector('.connection-feedback[role="alert"]')?.textContent).toContain('This input accepts one connection')
+  await act(async () => useFlowStore.getState().addConnectedNode(descriptorFor('trigger.manual'), { x: -300, y: 0 }, { direction: 'target', nodeId: target.id, handleId: 'flow', portType: 'flow' }))
+  expect(useFlowStore.getState().edges).toHaveLength(1)
+  await act(async () => useFlowStore.setState({ workflowExecution: { mode: 'dag', semantics: 'blueprint' } }))
+  expect(captured.props.isValidConnection?.(candidate)).toBe(true)
+  await act(async () => captured.props.onConnect?.(candidate))
+  expect(useFlowStore.getState().edges).toHaveLength(2)
+  await act(async () => useFlowStore.getState().addConnectedNode(descriptorFor('trigger.manual'), { x: -300, y: 0 }, { direction: 'target', nodeId: target.id, handleId: 'flow', portType: 'flow' }))
+  expect(useFlowStore.getState().edges).toHaveLength(3)
+})
+it('fits each newly opened graph once without moving the view during edits or selection', async () => {
+  await act(async () => root.render(<FlowApp />))
+  await act(async () => vi.advanceTimersByTimeAsync(50))
+  captured.fitView.mockClear()
+  await act(async () => { useFlowStore.setState({ workflowId: 'another-workflow' }); await vi.advanceTimersByTimeAsync(50) })
+  await act(async () => vi.advanceTimersByTimeAsync(50))
+  expect(captured.fitView).toHaveBeenCalledTimes(1)
+  await act(async () => {
+    useFlowStore.getState().onNodesChange([{ id: 'a', type: 'position', position: { x: 100, y: 100 }, dragging: true }])
+    useFlowStore.getState().selectNode('a')
+  })
+  await act(async () => vi.advanceTimersByTimeAsync(50))
+  expect(captured.fitView).toHaveBeenCalledTimes(1)
+  await act(async () => useFlowStore.setState({ activeSubflowId: 'subflow' }))
+  await act(async () => vi.advanceTimersByTimeAsync(50))
+  expect(captured.fitView).toHaveBeenCalledTimes(2)
+})
 it('keeps the inspector closed during a node drag but opens it on a deliberate click', async () => {
   await act(async () => root.render(<FlowApp />))
   expect(captured.props.selectNodesOnDrag).toBe(false)
@@ -114,9 +169,13 @@ it('keeps the resize gesture open when a form field loses focus inside the windo
 it('explains occupied input on release of a reverse drag with same-named handles', async () => {
   const [source, target] = useFlowStore.getState().nodes
   const existing = makeNode('c', 'builtin.noop', { x: 0, y: 240 })
-  useFlowStore.setState({ nodes: [source!, target!, existing], workflowExecution: { mode: 'dag' }, edges: [{ id: 'existing', source: 'c', sourceHandle: 'flow', target: 'b', targetHandle: 'flow' }] })
+  for (const node of [source!, target!, existing]) {
+    node.data.inputs = [{ id: 'value', type: 'number' }]
+    node.data.outputs = [{ id: 'value', type: 'number' }]
+  }
+  useFlowStore.setState({ nodes: [source!, target!, existing], workflowExecution: { mode: 'state-graph', semantics: 'blueprint' }, edges: [{ id: 'existing', source: 'c', sourceHandle: 'value', target: 'b', targetHandle: 'value' }] })
   await act(async () => root.render(<FlowApp />))
-  await act(async () => captured.props.onConnectEnd?.(new MouseEvent('mouseup'), { fromNode: target, fromHandle: { id: 'flow', type: 'target' }, toNode: source, toHandle: { id: 'flow', type: 'source' }, isValid: false } as never))
+  await act(async () => captured.props.onConnectEnd?.(new MouseEvent('mouseup'), { fromNode: target, fromHandle: { id: 'value', type: 'target' }, toNode: source, toHandle: { id: 'value', type: 'source' }, isValid: false } as never))
   expect(host.querySelector('.connection-feedback[role="alert"]')?.textContent).toContain('This input accepts one connection')
   expect(useFlowStore.getState().edges).toHaveLength(1)
   expect(host.querySelector('[role="dialog"]')).toBeNull()

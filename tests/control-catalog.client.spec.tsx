@@ -12,8 +12,15 @@ describe('shared control node port catalog', () => {
 
   it('isolates execution ports from optional data inputs', () => {
     for (const descriptor of controlNodeDescriptors()) {
+      if (descriptor.type === 'state.get') {
+        expect(descriptor.inputs).toEqual([])
+        expect(descriptor.outputs).toEqual([{ id: 'output', label: 'json', type: 'json' }])
+        continue
+      }
       expect(descriptor.inputs?.find(port => port.id === 'input')).toMatchObject({ type: 'flow', multiple: true })
-      expect(descriptor.outputs?.every(port => port.type === (['state.read', 'control.end'].includes(descriptor.type) ? 'json' : 'flow'))).toBe(true)
+      if (descriptor.type === 'state.read') {
+        expect(descriptor.outputs).toEqual([{ id: 'output', label: 'json', type: 'json' }, { id: 'flow', label: 'flow', type: 'flow' }])
+      } else expect(descriptor.outputs?.every(port => port.type === (descriptor.type === 'control.end' ? 'json' : 'flow'))).toBe(true)
       if (['control.join', 'state.read'].includes(descriptor.type)) expect(descriptor.inputs).toHaveLength(1)
       else expect(descriptor.inputs?.find(port => port.id === 'data')).toMatchObject({ type: 'any' })
     }

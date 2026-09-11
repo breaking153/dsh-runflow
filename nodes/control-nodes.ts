@@ -105,6 +105,14 @@ export function controlNodeDefinitions(): WorkflowNodeDefinition[] {
       async execute(context) { return { $runflow: 'control', outputs: { output: readStatePath(context.state ?? {}, typeof context.node.config.path === 'string' ? context.node.config.path : '') ?? null } } },
     },
     {
+      ...descriptor('state.get'),
+      async execute(context) {
+        const path = context.node.config.path ?? ''
+        if (typeof path !== 'string') throw new Error('State path must be a string')
+        return { $runflow: 'port-outputs', outputs: { output: structuredClone(readStatePath(context.state ?? {}, path) ?? null) } }
+      },
+    },
+    {
       ...descriptor('state.update'),
       async execute(context) {
         const key = context.node.config.key ?? 'result'

@@ -8,12 +8,14 @@ export default defineRunFlowNodePlugin({
     title: 'DSH Context Probe',
     description: '读取实时 Agent 与模型 Provider，验证自定义 Node 可调用 Host ctx。',
     category: 'data',
+    executionKind: 'effect', completionPort: 'flow',
     color: '#2563EB',
     icon: 'boxes',
-    inputs: [{ id: 'input', label: 'input', type: 'any' }],
+    inputs: [{ id: 'input', label: 'input', type: 'any' }, { id: 'flow', type: 'flow' }],
     outputs: [
       { id: 'summary', label: 'summary', type: 'json' },
       { id: 'providers', label: 'providers', type: 'json' },
+      { id: 'flow', type: 'flow' },
     ],
   },
   async execute(ctx, execution) {
@@ -22,7 +24,7 @@ export default defineRunFlowNodePlugin({
       version: 'context-v1',
       liveAgents: ctx.agents.list().length,
       providerCount: providers.length,
-      input: execution.input,
+      input: Object.hasOwn(execution.inputs, 'input') ? execution.inputs.input! : execution.input,
     }
     execution.log('Read live DSH registries through ctx', {
       liveAgents: summary.liveAgents,

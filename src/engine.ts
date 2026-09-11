@@ -20,6 +20,8 @@ import type {
 import type { ExecutionOutputWriter } from './output-store.ts'
 import { executeStateGraph, validateStateGraph } from './state-graph.ts'
 import { compatiblePortTypes } from './port-types.ts'
+import { effectiveNodeDescriptor, resolveNodeConfig, validPromotedInputs } from './node-properties.ts'
+import { completeNodeOutput, validateExecutionDescriptor } from './node-execution.ts'
 
 export class WorkflowValidationError extends Error {
   constructor(readonly issues: WorkflowValidationIssue[]) {
@@ -63,6 +65,9 @@ export function validateWorkflow(
     }
     ids.add(node.id)
     nodes.set(node.id, node)
+    if (node.promotedInputs !== undefined && !validPromotedInputs(node.promotedInputs)) {
+      issues.push({ code: 'INVALID_PROPERTY', message: 'Invalid promoted property paths on node ' + node.id, nodeId: node.id })
+    }
   }
   for (const edge of definition.edges) {
     if (!ids.has(edge.from)) {
@@ -80,18 +85,36 @@ export function validateWorkflow(
   if (definition.execution !== undefined && !['dag', 'state-graph'].includes(definition.execution.mode)) {
     return [{ code: 'INVALID_EXECUTION', message: 'Unknown workflow execution mode' }]
   }
-  if (definition.execution?.mode !== 'state-graph' && definition.nodes.some(node => node.type.startsWith('control.') || node.type.startsWith('state.'))) {
+  if (definition.execution?.semantics !== undefined && definition.execution.semantics !== 'blueprint') {
+    return [{ code: 'INVALID_EXECUTION', message: 'Unknown workflow execution semantics' }]
+  }
+  if (definition.execution?.mode !== 'state-graph' && definition.nodes.some(node => node.type.startsWith('control.') || node.type.startsWith('state.') && !(node.type === 'state.get' && definition.execution?.semantics === 'blueprint'))) {
     return [{ code: 'INVALID_EXECUTION', message: 'Control and state nodes require state-graph execution mode' }]
   }
 
   if (resolveNode !== undefined) {
+    const descriptors = new Map<string, WorkflowNodeDefinition | undefined>()
+    for (const node of definition.nodes) {
+      const provider = resolveNode(node.type)
+      if (provider !== undefined) {
+        try { validateExecutionDescriptor(provider) }
+        catch (error) { issues.push({ code: 'INVALID_EXECUTION', message: errorMessage(error), nodeId: node.id }); continue }
+      }
+      try {
+        if (provider === undefined && (node.promotedInputs?.length ?? 0) > 0) throw new Error('Cannot resolve properties for unavailable node provider: ' + node.type)
+        descriptors.set(node.id, provider === undefined ? undefined : effectiveNodeDescriptor(node, provider))
+      } catch (error) {
+        issues.push({ code: 'INVALID_PROPERTY', message: error instanceof Error ? error.message : String(error), nodeId: node.id })
+      }
+    }
+    if (issues.length > 0) return issues
     const incomingCounts = new Map<string, number>()
     for (const edge of definition.edges) {
       const sourceNode = nodes.get(edge.from)
       const targetNode = nodes.get(edge.to)
       if (sourceNode === undefined || targetNode === undefined) continue
-      const sourceProvider = resolveNode(sourceNode.type)
-      const targetProvider = resolveNode(targetNode.type)
+      const sourceProvider = descriptors.get(sourceNode.id)
+      const targetProvider = descriptors.get(targetNode.id)
       const sourceDescriptors = outputPorts(sourceProvider)
       const targetDescriptors = inputPorts(targetProvider)
       const sourceId = edge.sourcePort ?? sourceDescriptors[0]?.id
@@ -126,7 +149,8 @@ export function validateWorkflow(
         const key = edge.to + ':' + target.id
         const count = (incomingCounts.get(key) ?? 0) + 1
         incomingCounts.set(key, count)
-        if (count > 1 && target.multiple !== true && definition.execution?.mode !== 'state-graph') {
+        if (count > 1 && target.multiple !== true && !(target.type === 'flow' && definition.execution?.semantics === 'blueprint')
+          && (definition.execution?.mode !== 'state-graph' || definition.execution?.semantics === 'blueprint' || target.configKey !== undefined)) {
           issues.push({
             code: 'PORT_CARDINALITY',
             message: 'Input port ' + edge.to + '.' + target.id + ' accepts only one connection',
@@ -138,7 +162,7 @@ export function validateWorkflow(
     if (issues.length > 0) return issues
   }
 
-  if (definition.execution?.mode === 'state-graph') return validateStateGraph(definition)
+  if (definition.execution?.mode === 'state-graph') return validateStateGraph(definition, resolveNode)
 
   const incoming = new Map(definition.nodes.map(node => [node.id, 0]))
   const outgoing = new Map(definition.nodes.map(node => [node.id, [] as string[]]))
@@ -161,6 +185,7 @@ export function validateWorkflow(
   if (visited !== definition.nodes.length) {
     issues.push({ code: 'CYCLE', message: 'Workflow contains a cycle; dsh-runflow accepts DAGs only' })
   }
+  if (issues.length === 0 && definition.execution?.semantics === 'blueprint') return validateStateGraph(definition, resolveNode)
   return issues
 }
 
@@ -226,11 +251,11 @@ function nodeInputs(
   resolveNode: WorkflowEngineOptions['resolveNode'],
 ): { input: JsonValue; ports: JsonObject } {
   const provider = resolveNode(node.type)
-  const descriptors = inputPorts(provider)
+  const descriptors = inputPorts(provider === undefined ? undefined : effectiveNodeDescriptor(node, provider))
   const incoming = incomingFor(node.id, definition.edges)
     .filter(edge => edgeActive(edge, primaryOutputs, portOutputs))
   if (incoming.length === 0) {
-    const first = descriptors[0]
+    const first = descriptors.find(port => port.configKey === undefined)
     return {
       input: triggerInput,
       ports: first === undefined ? {} : { [first.id]: triggerInput },
@@ -249,9 +274,10 @@ function nodeInputs(
       ports[targetId] = value
     }
   }
-  const values = Object.values(ports)
+  const ordinaryPorts = Object.fromEntries(Object.entries(ports).filter(([id]) => descriptors.find(port => port.id === id)?.configKey === undefined))
+  const values = Object.values(ordinaryPorts)
   return {
-    input: values.length === 1 ? values[0] ?? null : ports,
+    input: values.length === 0 ? triggerInput : values.length === 1 ? values[0] ?? null : ordinaryPorts,
     ports,
   }
 }
@@ -284,14 +310,12 @@ function normalizeOutput(
 function terminalOutput(
   definition: WorkflowDefinition,
   primaryOutputs: Map<string, JsonValue>,
-  portOutputs: Map<string, JsonObject>,
+  terminalOutputs: Map<string, JsonValue>,
 ): JsonValue {
   const parents = new Set(definition.edges.map(edge => edge.from))
   const terminals = definition.nodes.filter(node => !parents.has(node.id) && primaryOutputs.has(node.id))
   const valueFor = (id: string): JsonValue => {
-    const ports = portOutputs.get(id) ?? {}
-    const values = Object.values(ports)
-    return values.length > 1 ? ports : primaryOutputs.get(id) ?? null
+    return terminalOutputs.get(id) ?? null
   }
   if (terminals.length === 1) return valueFor(terminals[0]!.id)
   return Object.fromEntries(terminals.map(node => [node.id, valueFor(node.id)]))
@@ -353,7 +377,7 @@ export async function executeWorkflow(
   options: ExecuteWorkflowOptions,
   engine: WorkflowEngineOptions,
 ): Promise<WorkflowExecution> {
-  if (definition.execution?.mode === 'state-graph') return executeStateGraph(definition, options, engine)
+  if (definition.execution?.mode === 'state-graph' || definition.execution?.semantics === 'blueprint') return executeStateGraph(definition, options, engine)
   // Freeze provider identities before validation. Hot reload may replace the
   // registry while this workflow is running, but every node in this execution
   // must observe one coherent provider generation.
@@ -413,6 +437,7 @@ export async function executeWorkflow(
 
   const primaryOutputs = new Map<string, JsonValue>()
   const portOutputs = new Map<string, JsonObject>()
+  const terminalOutputs = new Map<string, JsonValue>()
   const completed = new Set<string>()
   const triggerInput = options.input ?? ({} satisfies JsonObject)
   let writer: ExecutionOutputWriter | undefined
@@ -480,7 +505,7 @@ export async function executeWorkflow(
                 executionId: execution.id,
                 ...(options.agentId === undefined ? {} : { agentId: options.agentId }),
                 workflow: definition,
-                node,
+                node: resolveNodeConfig(node, provider, resolvedInput.ports),
                 input: resolvedInput.input,
                 inputs: resolvedInput.ports,
                 vars: {},
@@ -510,7 +535,8 @@ export async function executeWorkflow(
                   return clone(artifact)
                 },
               }), timeoutMs, controller.signal)
-              const normalized = normalizeOutput(result, provider)
+              const normalized = completeNodeOutput(normalizeOutput(result, provider), provider)
+              terminalOutputs.set(node.id, clone(normalized.terminalOutput))
               primaryOutputs.set(node.id, clone(normalized.output))
               portOutputs.set(node.id, clone(normalized.ports))
               record.output = clone(normalized.output)
@@ -538,7 +564,7 @@ export async function executeWorkflow(
       }
     }
     execution.status = 'SUCCESS'
-    execution.output = terminalOutput(definition, primaryOutputs, portOutputs)
+    execution.output = terminalOutput(definition, primaryOutputs, terminalOutputs)
   } catch (error) {
     const cancelled = controller.signal.aborted
       || (error instanceof WorkflowExecutionError && error.code === 'FLOW_CANCELLED')

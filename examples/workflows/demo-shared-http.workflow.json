@@ -1,0 +1,27 @@
+{
+  "id": "demo-shared-http",
+  "name": "Demo 03 · 双入口 HTTP / Shared request",
+  "version": 1,
+  "execution": { "mode": "state-graph", "semantics": "blueprint", "maxSteps": 20 },
+  "nodes": [
+    { "id": "demo-http-start-a", "type": "trigger.manual", "name": "入口 A / Start A", "config": {}, "position": { "x": 40, "y": 60 } },
+    { "id": "demo-http-start-b", "type": "trigger.manual", "name": "入口 B / Start B", "config": {}, "position": { "x": 40, "y": 270 } },
+    { "id": "demo-http-url", "type": "value.text", "name": "本地接口 / Endpoint", "config": { "value": "http://127.0.0.1:18947/echo" }, "position": { "x": 370, "y": 450 } },
+    { "id": "demo-http-body", "type": "value.json", "name": "请求正文 / Body", "config": { "value": { "demo": "shared-http", "message": "Hello RunFlow" } }, "position": { "x": 40, "y": 510 } },
+    { "id": "demo-http-request", "type": "http.request", "name": "共享请求 / HTTP Request", "config": { "url": "http://127.0.0.1:18947/echo", "method": "POST" }, "promotedInputs": ["url"], "position": { "x": 370, "y": 140 } },
+    { "id": "demo-http-storage", "type": "storage.write", "name": "保存响应 / Storage", "config": { "collection": "demo-http-responses" }, "position": { "x": 720, "y": 140 } },
+    { "id": "demo-http-continue", "type": "builtin.noop", "name": "成功后继续 / Continue", "config": {}, "position": { "x": 1050, "y": 140 } },
+    { "id": "demo-http-end", "type": "control.end", "name": "返回回执 / Result", "config": {}, "position": { "x": 1380, "y": 140 } }
+  ],
+  "edges": [
+    { "id": "demo-http-a-request", "from": "demo-http-start-a", "to": "demo-http-request", "sourcePort": "output", "targetPort": "input" },
+    { "id": "demo-http-b-request", "from": "demo-http-start-b", "to": "demo-http-request", "sourcePort": "output", "targetPort": "input" },
+    { "id": "demo-http-url-request", "from": "demo-http-url", "to": "demo-http-request", "sourcePort": "value", "targetPort": "property-url" },
+    { "id": "demo-http-body-request", "from": "demo-http-body", "to": "demo-http-request", "sourcePort": "value", "targetPort": "body" },
+    { "id": "demo-http-request-storage-flow", "from": "demo-http-request", "to": "demo-http-storage", "sourcePort": "flow", "targetPort": "flow" },
+    { "id": "demo-http-request-storage-data", "from": "demo-http-request", "to": "demo-http-storage", "sourcePort": "body", "targetPort": "input" },
+    { "id": "demo-http-storage-continue", "from": "demo-http-storage", "to": "demo-http-continue", "sourcePort": "flow", "targetPort": "flow" },
+    { "id": "demo-http-continue-end", "from": "demo-http-continue", "to": "demo-http-end", "sourcePort": "output", "targetPort": "input" },
+    { "id": "demo-http-storage-end-data", "from": "demo-http-storage", "to": "demo-http-end", "sourcePort": "output", "targetPort": "data" }
+  ]
+}

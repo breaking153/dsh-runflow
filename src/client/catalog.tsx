@@ -6,11 +6,14 @@ import {
 } from 'lucide-react'
 import type { WorkflowNodeDescriptor } from '../contracts.ts'
 import { controlNodeDescriptors } from '../control-node-catalog.ts'
+import { valueNodeDescriptors } from '../value-node-catalog.ts'
+import { withCoreNodeExecution } from '../core-node-execution.ts'
 
 const triggerOutput = [{ id: 'output', label: 'flow', type: 'flow' as const }]
 
-export const NODE_CATALOG: WorkflowNodeDescriptor[] = [
+const fallbackCatalog: WorkflowNodeDescriptor[] = [
   ...controlNodeDescriptors(),
+  ...valueNodeDescriptors(),
   { type: 'trigger.agent', title: 'Agent input', description: '接收 AI Agent 工具提供的输入', category: 'trigger', color: '#22c55e', icon: 'bot', inputs: [], outputs: triggerOutput },
   { type: 'trigger.manual', title: 'Manual Trigger', description: '手动启动工作流', category: 'trigger', color: '#22c55e', icon: 'mouse-pointer-click', inputs: [], outputs: triggerOutput },
   { type: 'trigger.webhook', title: 'Webhook', description: '接收带专用令牌的 HTTP 输入；需 Host Web 服务', category: 'trigger', color: '#22c55e', icon: 'webhook', inputs: [], outputs: triggerOutput },
@@ -57,11 +60,12 @@ export const NODE_CATALOG: WorkflowNodeDescriptor[] = [
   { type: 'builtin.json-stringify', title: 'Stringify JSON', description: '把 JSON 序列化为文本', category: 'data', group: 'Core/Data', color: '#38bdf8', icon: 'text', inputs: [{ id: 'json', type: 'json' }], outputs: [{ id: 'text', type: 'text' }] },
   { type: 'builtin.wait', title: 'Wait', description: '暂停当前执行分支', category: 'logic', group: 'Core/Flow', color: '#a78bfa', icon: 'timer', inputs: [{ id: 'flow', type: 'flow' }], outputs: [{ id: 'output', label: 'flow', type: 'flow' }] },
   { type: 'builtin.stop-error', title: 'Stop & Error', description: '用明确错误终止执行', category: 'logic', group: 'Core/Flow', color: '#ef4444', icon: 'circle-stop', inputs: [{ id: 'flow', type: 'flow' }], outputs: [] },
-  { type: 'builtin.noop', title: 'No Operation', description: '保留控制流，不修改信号', category: 'logic', group: 'Core/Flow', color: '#94a3b8', icon: 'route', inputs: [{ id: 'flow', type: 'flow' }], outputs: [{ id: 'flow', type: 'flow' }] },
+  { type: 'builtin.noop', title: 'No Operation', description: '保留控制流，不修改信号', category: 'logic', group: 'Core/Flow', color: '#94a3b8', icon: 'route', inputs: [{ id: 'flow', type: 'flow' }], outputs: [{ id: 'output', label: 'flow', type: 'flow' }] },
   { type: 'dsh.agent', title: 'DSH Agent', description: '原生 Subagent · AgentOptions / Structured Output / Tool Filter', category: 'ai', color: '#60a5fa', icon: 'bot', available: true, inputs: [{ id: 'input', label: 'json', type: 'json' }, { id: 'flow', type: 'flow' }, { id: 'text', type: 'text' }], outputs: [{ id: 'result', label: 'result', type: 'json' }] },
   { type: 'dsh.llm', title: 'LLM', description: '调用宿主大模型能力', category: 'ai', color: '#818cf8', icon: 'braces', available: false, inputs: [{ id: 'text', type: 'text' }, { id: 'json', type: 'json' }], outputs: [{ id: 'text', type: 'text' }, { id: 'usage', type: 'json' }] },
   { type: 'storage.write', title: 'Storage', description: '写入本次 Host 执行产物', category: 'data', color: '#2dd4bf', icon: 'database', inputs: [{ id: 'input', label: 'json', type: 'json' }], outputs: [{ id: 'output', label: 'receipt', type: 'json' }] },
 ]
+export const NODE_CATALOG: WorkflowNodeDescriptor[] = fallbackCatalog.map(withCoreNodeExecution)
 
 let hostCatalog: WorkflowNodeDescriptor[] = []
 

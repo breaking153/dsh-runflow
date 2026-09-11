@@ -1,24 +1,34 @@
 # Dependencies and build artifacts
 node_modules/
 .pnpm-store/
-lib/
-preview-dist/
-coverage/
+/lib/
+/preview-dist/
+/coverage/
 *.tsbuildinfo
 
 # Local tools and isolated workspaces
-.worktrees/
-.code-review-graph/
-.playwright-cli/
-.ua/
+/.worktrees/
+/.code-review-graph/
+/.playwright-cli/
+/.ua/
+/.cache/
+
+# Browser/test output and authentication state
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.auth/
 
 # Local runtime data
-output/runflow/
-data/runflow/
+# Reviewed visual evidence belongs in docs/assets/evidence/.
+/output/
+/data/runflow/
 
 # Logs and local environment settings
 *.log
 .DS_Store
+Thumbs.db
+Desktop.ini
 .env
 .env.*
 !.env.example

@@ -20,6 +20,7 @@ interface ConnectableNode {
 
 interface ConnectionRules {
   mode: 'dag' | 'state-graph'
+  semantics?: 'blueprint' | undefined
   edges: readonly Pick<Edge, 'source' | 'target' | 'sourceHandle' | 'targetHandle'>[]
 }
 
@@ -81,7 +82,8 @@ export function validateNodeConnection(nodes: readonly ConnectableNode[], connec
   const targetId = (edge: ConnectionRules['edges'][number]): string | undefined => edge.targetHandle ?? nodes.find(node => node.id === edge.target)?.data.inputs[0]?.id
   if (rules?.edges.some(edge => edge.source === source.id && edge.target === target.id && sourceId(edge) === output.id && targetId(edge) === input.id)) return { ok: false, reason: 'duplicate', ...types }
   if (rules?.mode === 'dag' && reaches(rules.edges, target.id, source.id)) return { ok: false, reason: 'cycle', ...types }
-  if (rules?.mode !== 'state-graph' && input.multiple !== true && rules?.edges.some(edge => edge.target === target.id && targetId(edge) === input.id)) return { ok: false, reason: 'input-occupied', ...types }
+  const independentFlow = input.type === 'flow' && rules?.semantics === 'blueprint'
+  if (!independentFlow && (input.configKey !== undefined || rules?.mode !== 'state-graph' || rules?.semantics === 'blueprint') && input.multiple !== true && rules?.edges.some(edge => edge.target === target.id && targetId(edge) === input.id)) return { ok: false, reason: 'input-occupied', ...types }
   return { ok: true, connection: candidate, ...types }
 }
 

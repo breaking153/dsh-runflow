@@ -1,0 +1,19 @@
+{
+  "id": "blueprint-values",
+  "name": "Blueprint · Values and Flow",
+  "version": 1,
+  "execution": { "mode": "state-graph", "semantics": "blueprint", "maxSteps": 20 },
+  "nodes": [
+    { "id": "manual", "type": "trigger.manual", "name": "Start", "config": {}, "position": { "x": 80, "y": 100 } },
+    { "id": "duration", "type": "value.number", "name": "Wait duration", "config": { "value": 0 }, "position": { "x": 80, "y": 280 } },
+    { "id": "wait", "type": "builtin.wait", "name": "Wait", "config": { "durationMs": 1 }, "promotedInputs": ["durationMs"], "position": { "x": 400, "y": 100 } },
+    { "id": "payload", "type": "value.json", "name": "Result data", "config": { "value": { "message": "Hello Blueprint", "ready": false } }, "position": { "x": 400, "y": 330 } },
+    { "id": "end", "type": "control.end", "name": "Return result", "config": {}, "position": { "x": 720, "y": 100 } }
+  ],
+  "edges": [
+    { "id": "start-wait", "from": "manual", "to": "wait", "sourcePort": "output", "targetPort": "flow" },
+    { "id": "duration-wait", "from": "duration", "to": "wait", "sourcePort": "value", "targetPort": "property-duration_4d_s" },
+    { "id": "wait-end", "from": "wait", "to": "end", "sourcePort": "output", "targetPort": "input" },
+    { "id": "payload-end", "from": "payload", "to": "end", "sourcePort": "value", "targetPort": "data" }
+  ]
+}

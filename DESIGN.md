@@ -10,7 +10,7 @@ The previous dense pale editor did not meet the requested visual direction. A gl
 
 ## Visual language
 
-- Reuse the existing RunFlow SVG mark and Lucide icons. Existing project assets are retained; no new external artwork, fonts or component library is introduced.
+- RunFlow's mark uses two rounded input paths converging into a forward arrow, reflecting shared executable logic. Use the same geometry in `RunFlowLogo.tsx`, the favicon and documentation SVGs; small in-app marks inherit `currentColor`, while standalone tiles use DSH blue `#356AC3`. Retain Lucide for action and node icons. No external artwork, fonts or component library is introduced.
 - Keep the established CSS variable names while defining the graph's scoped graphite palette in `src/client/blueprint-styles.ts`: canvas `#1b2028`, surface `#252b34`, border `#3a424f`, text `#e2e7ee`, muted text `#a1acbd`, primary action `#4279cb` and focus `#9dc5ff`. DSH blue remains the selection and action cue; the surrounding Host keeps its own styling.
 - Use the existing system sans stack for controls and prose, monospace for code and identifiers. Hierarchy comes from size, weight and spacing; errors and execution states include words or icons.
 - Execution `flow` pins have pointed geometry; data pins are circular and retain visible type labels. Pin and wire colors come from `src/client/port-presentation.ts`, with shape and text carrying meaning alongside color.

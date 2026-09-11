@@ -38,12 +38,12 @@ Webhook 接收采用 POST、Bearer 摘要校验、JSON 类型及有限数值校�
 
 | 证据 | 桌面 | 窄屏 |
 | --- | --- | --- |
-| 图设置 | [1440](../output/playwright/state-graph/settings-1440.png) | [375](../output/playwright/state-graph/settings-375.png) |
-| Loop 配置 | [1440](../output/playwright/state-graph/loop-1440.png) | [375](../output/playwright/state-graph/loop-375.png) |
-| Webhook 不可用态 | [1440](../output/playwright/state-graph/webhook-1440.png) | [375](../output/playwright/state-graph/webhook-375.png) |
-| 暂停与 JSON 输入 | [1440](../output/playwright/state-graph/paused-1440.png) | [375](../output/playwright/state-graph/paused-375.png) |
+| 图设置 | [1440](assets/evidence/playwright/state-graph/settings-1440.png) | [375](assets/evidence/playwright/state-graph/settings-375.png) |
+| Loop 配置 | [1440](assets/evidence/playwright/state-graph/loop-1440.png) | [375](assets/evidence/playwright/state-graph/loop-375.png) |
+| Webhook 不可用态 | [1440](assets/evidence/playwright/state-graph/webhook-1440.png) | [375](assets/evidence/playwright/state-graph/webhook-375.png) |
+| 暂停与 JSON 输入 | [1440](assets/evidence/playwright/state-graph/paused-1440.png) | [375](assets/evidence/playwright/state-graph/paused-375.png) |
 
-四种宽度均无页面横向溢出；375 像素下运行设置边界为 x=60–371，暂停面板为 x=62–361，并验证了[滚动后恢复按钮可达](../output/playwright/state-graph/resume-controls-375.png)。修复了设置面板宽度与暂停面板遗留居中位移造成的窄屏裁切。生产构建也在 [1440](../output/playwright/state-graph/production-1440.png) 与 [375](../output/playwright/state-graph/production-375.png) 完成模式切换和步数输入，浏览器未报告脚本错误。
+四种宽度均无页面横向溢出；375 像素下运行设置边界为 x=60–371，暂停面板为 x=62–361，并验证了[滚动后恢复按钮可达](assets/evidence/playwright/state-graph/resume-controls-375.png)。修复了设置面板宽度与暂停面板遗留居中位移造成的窄屏裁切。生产构建也在 [1440](assets/evidence/playwright/state-graph/production-1440.png) 与 [375](assets/evidence/playwright/state-graph/production-375.png) 完成模式切换和步数输入，浏览器未报告脚本错误。
 
 未添加生产依赖或更改锁文件。生产预览主包由基线 645.66 kB / gzip 181.49 kB 增至 668.30 kB / gzip 189.33 kB，增加来自状态图编辑、恢复及 Webhook 界面。现有单包超过 500 kB 的构建提示仍在，未抬高告警阈值。这里报告构建体积与功能验证，没有声称生产吞吐或页面性能评分。
 

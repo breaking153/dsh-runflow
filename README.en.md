@@ -1,399 +1,201 @@
 <p align="center">
-  <img src="./docs/assets/dsh-runflow-logo.svg" width="520" alt="DSH RunFlow Logo" />
+  <img src="./docs/assets/dsh-runflow-logo.svg" width="520" alt="DSH RunFlow" />
 </p>
 
-<p align="center">
-  Visual DAG and state-graph workflow orchestration integrated with DeepSeek Harness
-</p>
+<p align="center">Turn AI plans into workflows you can inspect, execute, and debug inside DeepSeek Harness.</p>
+<p align="center"><a href="./README.md">简体中文</a> · <strong>English</strong></p>
 
-<p align="center">
-  <a href="./README.md">简体中文</a> · <strong>English</strong>
-</p>
+**DSH RunFlow is a visual workflow plugin for DeepSeek Harness.** Ask an Agent to draft a workflow, inspect its steps and data on the canvas, then execute it through the same DSH Host. Combine HTTP requests, JavaScript, child Agents, and stateful control into repeatable tasks.
 
-DSH RunFlow reuses the Agent, Subagent, LLM Provider, `run_code`, scope, permission, and lifecycle systems already provided by DeepSeek Harness. Visual authoring, node development, execution, and debugging all run inside the same Host. RunFlow is not a second Agent runtime and does not bypass DSH through a standalone HTTP service.
+It is for developers and automation users who already use DSH and want to save multistep work while seeing what happens at each step. This is `0.1.0` Alpha, targeting DSH `0.1.5-rc.1`; see the [compatibility record](./docs/DSH_COMPATIBILITY.md).
 
-> The current release is `0.1.0` Alpha on Host architecture v2. Existing DAGs remain compatible; optional state graphs add bounded loops, shared-state reducers, and pause/resume. Entry points include manual runs, normal Agents, and authenticated webhooks. Webhooks require the existing Host web service and a live Agent binding. Schedule, DSH Event, and standalone LLM nodes remain unimplemented. See the [state-graph and ingress guide (Chinese)](./docs/STATE_GRAPH_GUIDE.md) for configuration and limits.
+![RunFlow workflow editor with separate execution and data connections](./docs/assets/screenshots/workflow-editor.png)
 
-## Highlights
+## What you can build
 
-- **Native DSH execution**: `dsh.agent` starts child agents through `ctx.subagents.start()` and discovers Provider, Model, and capability data from the active Host.
-- **Visual DAG and state-graph authoring**: typed named ports, multiple outputs, conditional routing, parallel joins, shared state, and bounded loops. Definitions without an execution mode keep legacy DAG behavior.
-- **Three execution entry points**: UI manual runs, the normal Agent `runflow` tool, and live Agent-authorized webhooks share the Host engine. The owning Agent can resume an explicit pause.
-- **Multiple workflows**: manage definitions, triggers, and recent runs from one sidebar; UI changes are persisted immediately.
-- **Observable runs**: inspect node status, duration, inputs, outputs, logs, errors, and artifacts through one Details UI.
-- **Node development loop**: creation-mode tools and Node Lab support authoring, real execution tests, content-hash versions, hot reload, and test-gated persistence.
-- **Isolated runtime data**: workflow, execution, and output files live under `~/.dsh_agent_workflow/`, outside both the DSH checkout and plugin directory.
-- **AI review first**: Agent-generated workflows enter Review before manual tuning; diagnostics and stable diffs remain visible, and human changes mark the draft as edited.
+| Use case | Typical workflow |
+| --- | --- |
+| API data processing | HTTP request → JSON transformation → saved results and artifacts |
+| Agent-assisted review | Prepare input → DSH child Agent → structured result → next action |
+| Stateful tasks | Conditional branches, bounded loops, parallel joins, shared state, and explicit pause/resume |
 
-## UI and interaction model
+RunFlow reuses DSH sessions, Providers, tool policies, and lifecycle management. Model and script capabilities depend on services available in the current Host; the node catalog exposes availability.
 
-### 1. Enter RunFlow from DSH
+## From an idea to a repeatable workflow
 
-Hover over **RunFlow** in the DSH sidebar to open a multi-workflow summary showing each Trigger and most recent result. Click the entry to open the floating workspace.
+1. **Draft with AI**: in the configured creation preset, ask the Agent to inspect available nodes and write a Workflow. Ordinary sessions can run saved workflows.
+2. **Review first**: check the nodes, parameters, data sources, and execution connections. The Review panel supports diffs and diagnostics for staged candidates; a saved draft still needs inspection.
+3. **Edit visually**: connect typed ports, adjust defaults, move nodes, or expose properties as data inputs. Workflow changes autosave.
+4. **Execute**: select the current DSH parent session and entry, then run from the workbench or ask an ordinary Agent to use the `runflow` tool.
+5. **Debug**: inspect node status, call counts, inputs, outputs, logs, errors, and files in the execution record, then refine the workflow.
 
-![RunFlow multi-workflow summary in the DSH sidebar](./output/playwright/runflow-host-sidebar-hover.png)
+The canvas supports node search, compatible-node creation from a dragged connection, marquee selection, copy/paste, undo/redo, groups, reroutes, and one executable subflow level. Configuration and execution evidence stay in contextual panels.
 
-The workspace can be moved, resized, maximized, minimized, and restored. Clicking the normal DSH conversation area closes RunFlow, which keeps switching between chat and workflow work fast.
+## A Blueprint-style node model
 
-### 2. Manage multiple workflows
+New workflows use Blueprint execution semantics, separating **when an action runs** from **which data it consumes**.
 
-The overview creates, searches, filters, duplicates, and deletes workflows. The left sidebar keeps Trigger and recent-run summaries visible. A workflow created or edited in the UI is written to disk immediately, so running it once does not make it disappear.
+| Node kind | Execution | Examples |
+| --- | --- | --- |
+| Trigger | Starts a call from an entry | Manual, Agent, Webhook when available |
+| Effect | Runs on incoming flow and emits completion flow after success | HTTP, Agent, JavaScript, Storage, Wait, state updates |
+| Pure | Computes when a consuming action needs data; no flow required | Text/number/boolean/JSON values, transforms, `state.get` |
 
-![Workflows tab with workflow state](./output/playwright/runflow-workflows-desktop.png)
+Branches, Join, pause, and end nodes keep their own control rules. Failed effects do not emit successful completion; a data connection does not implicitly repeat an HTTP request or Agent call.
 
-Basic flow:
+```text
+Trigger A ──flow──┐
+                 ├── HTTP ──flow── Storage
+Trigger B ──flow──┘      └──body──→ input
+Text Value ──value──→ HTTP URL property input
+```
 
-1. Select **Create workflow**.
-2. Choose the workflow in the sidebar, then edit its name in the header.
-3. Changes auto-save to the workflow's own file; RunFlow re-confirms persistence before execution.
-4. Open **Executions** to inspect historical runs and per-node results.
+Multiple Triggers can connect to one flow input. Each arrival calls the shared action independently. Use an explicit `control.join` to wait for parallel branches; data inputs retain their declared single-value or multiple-value constraints.
 
-### 3. Edit the canvas and add nodes
+**Promote a property to an input**: select a node, choose “Promote to input” beside a property, then connect a compatible data output. The saved default remains available when disconnected; a connection supplies the current call's value. Restore returns to a normal property, and undo can restore its pin and wires together.
 
-![Nodes tab with the grouped node library](./output/playwright/comfy-sidebar-nodes.png)
+![An HTTP URL property promoted to an input and connected to a pure text value](./docs/assets/screenshots/property-inputs.png)
 
-The canvas uses a graphite workbench inspired by UE Blueprint, with DSH blue selection and primary actions, while retaining familiar workflow-editor interactions:
+Values such as `false`, `0`, an empty string, and schema-permitted `null` remain intact. `state.get` reads the current state snapshot on demand; `state.read` preserves sequenced reads. Pure results are not cached permanently across later calls or loop iterations.
 
-- Left-drag on empty space to marquee-select multiple nodes.
-- Hold the right mouse button and drag to pan; use the wheel or controls to zoom and fit the view.
-- Use the left **Nodes** tab to search or collapse groups, click to insert, or drag a node to an exact canvas position.
-- Right-click empty space, or select **Add node**, to open the Node Library.
-- Select a node to edit it in the Inspector; duplicate and delete actions live in the Inspector header.
-- Node drag, wire drag, and marquee gestures keep canvas and Inspector geometry stable; completed group resizing persists and supports one-step undo.
-- Drag an input or output port into empty space to list only directionally and type-compatible nodes.
-- Pointed pins identify `flow`; circular pins identify data. Invalid targets immediately show a red wire and an explanation, and release creates no invalid edge.
-- Hover a port for roughly 500ms to see a bounded preview; click the port or expand action for complete data.
+**Existing workflows retain their execution semantics.** Definitions with no mode remain legacy DAGs. Add explicit flow connections before switching an old data-driven workflow to Blueprint. DAGs reject cycles; bounded loops use state graphs. See the [Blueprint guide](./docs/BLUEPRINT_EXECUTION_GUIDE.md) and [state-graph guide](./docs/STATE_GRAPH_GUIDE.md) (Chinese).
 
-![Visible DSH-blue selection marquee](./output/playwright/comfy-selection-marquee.png)
+## Install and run your first workflow
 
-![Resizable parameter inspector and typed ports](./output/playwright/runflow-editor-desktop.png)
+### 1. Prepare the environment
 
-Custom providers can declare their own hierarchy with an optional slash-delimited `group`, such as `Acme Tools/Images`. Omitting it keeps the legacy `category` fallback. Node Lab is reserved for source authoring rather than node discovery.
+- Node.js `^22.19.0` or `>=24.0.0`, plus pnpm.
+- A working DSH Web profile using `0.1.5-rc.1`, matching the plugin dependencies.
+- This is a local development plugin, not a published npm package; installation uses a local link.
 
-The workbench retains one general Host status indicator and one set of zoom controls. The historical screenshots above show earlier UI versions; see the [Blueprint UI report (Chinese)](./docs/BLUEPRINT_UI_REPORT.md) for this visual direction and its validation evidence.
-
-### 4. Configure a DSH Agent node
-
-The Agent node is not a simulation. It reads the active Host's Subagent Provider and LLM model catalogs, then maps its fields to current DSH Agent and start options.
-
-![Base DSH Agent node configuration](./output/playwright/docs-agent-options.png)
-
-Available controls include:
-
-- Subagent Provider and Child Label;
-- `agentOptions.provider`, `model`, `reasoningEffort`, and `maxTokens`;
-- `maxDepth`, `outputSchema`, `toolFilter.allow/deny`, and `persona`;
-- node retry and timeout, workflow input, and workflow output directory.
-
-<details>
-<summary>Show Child capabilities and Tool Filter configuration</summary>
-
-![AgentOptions and Child capabilities](./output/playwright/docs-agent-capabilities.png)
-
-</details>
-
-The Host validates every requested capability before execution. Unsupported output schemas, depth limits, tool filters, or personas fail explicitly instead of being silently ignored. Empty AgentOptions inherit from the Provider or parent Agent.
-
-### 5. Run, debug, and inspect results
-
-When connected to the DSH Host, **Execute workflow** calls a Typert Remote authorized for the current primary Agent. The Host returns an execution ID immediately and the UI polls that execution. Normal Agents can also run existing workflows with `runflow`. Webhooks use the existing Host HTTP service, a live binding, and Bearer authentication; external input cannot select the Agent, definition, or output directory. Cross-Agent execution reads, cancellation, and resume are rejected.
-
-![Node execution Details UI](./output/playwright/host-integrated-creation-run-code.png)
-
-Node Details exposes five views: **Overview, Input, Output, Logs, and Files**. Failed nodes prioritize structured error information, while Files lists final artifacts and `intermediate/` debug output. Details can be opened from a node card, a port preview, or a node row in execution history.
-
-**Run settings** exposes the execution mode, step limit, entry nodes, initial state, and reducers. State graphs report steps and state; `PAUSED` means an explicit JSON response is required, not failure or completion. Resuming `control.interrupt` uses the same frozen workflow definition. Arbitrary `RUNNING` executions are not automatically recovered after a crash. See the [guide](./docs/STATE_GRAPH_GUIDE.md) for configuration and examples.
-
-> The standalone `pnpm dev` page is only a layout and interaction preview. Without a DSH Host it shows **Host disconnected**, disables real execution, and never synthesizes mock results.
-
-### 6. Develop nodes and scripts in Node Lab
-
-The **Nodes** tab exposes **Node Lab** in its footer. In creation mode it reads the Host source library under `nodes/` and `script/`, shows a content-hash revision after save, and schedules a serial hot reload.
-
-- The lightweight editor supports line numbers, Tab indentation, `Ctrl+Space`, and dot-triggered basic completion.
-- Completion covers `ctx.flow`, `ctx.flowScript`, `ctx.agents`, `ctx.llm`, `ctx.tools`, `execution.node.config`, logs, and intermediate artifacts.
-- For larger refactors, use `defineRunFlowNodePlugin()` / `defineRunFlowScriptPlugin()` in WebStorm for complete TypeScript inference.
-
-## Install and run the first workflow
-
-RunFlow requires Node.js `^22.19.0` or `>=24.0.0` and DeepSeek Harness `0.1.5-rc.1`, matching the current peer dependencies. See the [compatibility record](docs/DSH_COMPATIBILITY.md) for verification and the local Web launcher.
-
-### Local link installation
-
-Start in the `dsh-flow` repository root, with the `deepseek-harness` repository in the same parent directory. Build the plugin first:
+Build from the **dsh-flow repository root**:
 
 ```powershell
-pnpm install
+pnpm install --frozen-lockfile
 pnpm build
 ```
 
-Then add it to the DSH Web profile from the DeepSeek Harness repository:
+### 2. Link the configured Web profile
+
+These PowerShell paths match the verified Windows Web profile. On another platform or with a custom `DSH_HOME`, use the CLI path inside your corresponding profile.
 
 ```powershell
-cd ../deepseek-harness
-pnpm dsh plugin --profile web add "link:../dsh-flow"
+$runflowPath = (Get-Location).Path
+$runflowCli = Join-Path $env:USERPROFILE ".dsh\profiles\web\node_modules\.bin\dsh.cmd"
+& $runflowCli --version
+& $runflowCli plugin --profile web add "link:$runflowPath"
 ```
 
-Restart the Web profile. **RunFlow** will appear in the DSH sidebar. The bundle injects this default configuration:
+The version should match `0.1.5-rc.1`. A different global `dsh` or source-checkout CLI is not an equivalent replacement. The [compatibility record](./docs/DSH_COMPATIBILITY.md) covers the verified profile and its peer dependencies.
 
-```yaml
-- insert:
-    - id: dsh-runflow
-      name: dsh-runflow
-      config:
-        maxParallelNodes: 4
-        defaultTimeoutMs: 30000
-        watchFiles: true
-        enableAuthoringTools: true
-        authoringPresetId: cordis
+Stop and restart your Web Host using its normal process:
+
+```powershell
+pnpm --dir "$env:USERPROFILE\.dsh\profiles\web" run web
 ```
 
-For a first run, import `bounded-loop.workflow.json` using the [state-graph guide](./docs/STATE_GRAPH_GUIDE.md#导入三个本地示例), inspect its loop and ports, and select **Execute workflow**. The expected local count is `3`, without invoking a real Agent. Other nodes must follow their declared port types; a Trigger's `flow` output cannot connect directly to a JSON data input.
+If the profile has no `web` script, run `& $runflowCli web` from the directory you want as the default workspace. After rebuilding the plugin, refreshing the browser alone does not replace loaded Host code.
 
-## DeepSeek Harness architecture
+### 3. Start with two local nodes
+
+1. Open or create a DSH parent session, then open **RunFlow** from the sidebar.
+2. Create a workflow and add **Manual Trigger** and **No Operation**.
+3. Connect the Trigger's flow output to No Operation's flow input.
+4. Select **Execute workflow**.
+5. Open the execution record, confirm both nodes succeeded, and inspect their inputs and outputs.
+
+This workflow makes no model calls or external HTTP requests. It still needs a connected DSH Host and selected session; the standalone preview cannot perform real execution.
+
+Next, try the [Values and Flow example](./examples/workflows/blueprint-values.workflow.json) for constants, promoted inputs, and returned data. It returns `{"message":"Hello Blueprint","ready":false}`. To import JSON through an Agent, follow the [example import instructions](./docs/STATE_GRAPH_GUIDE.md#导入三个本地示例), checking the workflow ID before saving over an existing definition.
+
+**Four runnable demos** cover [data processing, conditions, shared HTTP, and loop/pause/resume](./docs/DEMOS.md). The guide includes JSON files, DSH Web loading instructions, expected outputs, and failure recovery. No model credentials are required. See the [verification report](./docs/PRESENTATION_REFRESH.md) for real runs and corrections made during this refresh.
+
+## Inspect execution evidence
+
+![Execution details with node status, inputs, and outputs](./docs/assets/screenshots/execution-details.png)
+
+Execution records include node status, duration, inputs, named outputs, logs, structured errors, and artifacts. Port previews provide a quick look; Details expands the complete data. State graphs also retain step and shared-state evidence.
+
+`PAUSED` means the workflow is waiting for an explicit resume value. Resuming `control.interrupt` uses the frozen Workflow definition. Reading, cancelling, and resuming executions checks the owning Agent. Agent-node Providers, Models, and supported options come from the live Host; unsupported capabilities fail explicitly.
+
+## Extend nodes and scripts
+
+![Node search includes four typed values beside a successfully completed loop](./docs/assets/screenshots/node-library.png)
+
+Use Nodes to discover and add capabilities; use Node Lab for source development. Custom nodes can declare a `group` path such as `Acme Tools/Images`.
+
+- **JavaScript and JSON program nodes** execute through the current Agent's DSH `run_code`, retaining its tool policies, approval, and cancellation path.
+- **File-backed Node / Script plugins** such as `*.node.ts` and `*.script.ts` are trusted Cordis child plugins with direct Host `ctx` access. Saved files reload serially using content hashes.
+- **Authoring tools**: `runflow_node` creates, tests, and commits providers. The current revision must pass its test before commit. `runflow_workflow` handles workflow authoring.
+
+Ordinary Agents use `runflow` to run and inspect saved workflows. Authoring is limited to the configured creation preset, `cordis` by default, and can be disabled with `enableAuthoringTools: false`.
+
+Custom providers become pure only through an explicit `executionKind: 'pure'` declaration. Effects may declare `completionPort` for successful continuation; terminators and custom routers do not receive a forced continuation path. See [Node Library](./nodes/README.md), [Script executor](./script/README.md), and the [Blueprint guide](./docs/BLUEPRINT_EXECUTION_GUIDE.md).
+
+## Architecture and storage
 
 ```mermaid
 flowchart LR
-  UI[DSH Web / RunFlow UI] -->|Typert Remote + current agentId| REMOTE[RunFlow Remote]
-  REMOTE --> FLOW[ctx.flow / DAG + State Graph Engine]
-  AGENT[Normal Agent / runflow tool] --> FLOW
-  WEB[Host Web Server] -->|Bearer + live Agent binding| FLOW
-  FLOW --> SNAPSHOT[Node Provider snapshot]
-  SNAPSHOT --> NODE[Built-in and file-backed nodes]
-  NODE --> SUB[ctx.subagents.start]
-  NODE --> CODE[ctx.flowScript / run_code]
-  NODE --> HOST[Trusted Cordis ctx services]
-  FLOW --> DATA[~/.dsh_agent_workflow/data]
-  FLOW --> OUTPUT[~/.dsh_agent_workflow/output]
-  WATCH[nodes/ and script/ watchers] -->|SHA-256 version + serial reload| SNAPSHOT
+  UI["DSH Web · RunFlow"] -->|"Current Agent · Typert Remote"| FLOW["FlowService · Execution engines"]
+  AGENT["Agent · runflow tool"] --> FLOW
+  WEB["Host Web · Authenticated entry"] --> FLOW
+  FLOW --> NODES["Built-in / custom Node Providers"]
+  NODES --> SUB["DSH Subagent"]
+  NODES --> CODE["DSH run_code"]
+  NODES --> CTX["Trusted Cordis ctx"]
+  FLOW --> FILES["Workflow / Execution / artifact files"]
 ```
 
-Important boundaries:
+The frontend uses React, Zustand, and React Flow. The Host owns validation, scheduling, authorization, cancellation, and persistence. Each start or resume snapshots Providers so one execution segment does not mix hot-reloaded versions.
 
-- RunFlow captures a Node Provider snapshot at each start or resume. That execution segment keeps the same Providers even if source files change while it is active. Resume uses the frozen workflow definition with currently available Providers.
-- The `nodes/` and `script/` loaders use a `tsc --watch`-style single-flight queue: file events are coalesced, versions are SHA-256 content hashes, and the old Cordis fiber is disposed before the new version activates.
-- If a new version cannot import or activate, the loader attempts to restore the previous version. Later file changes continue to trigger reloads.
-- The UI Remote is scoped to the active primary Agent. Single-node debugging executes the target and all of its upstream dependencies, not a fake canvas-order subset.
-
-## Creation mode and AI authoring
-
-While the plugin is active, normal live Agents receive the runtime `runflow` tool with `capabilities/list/get/start/get_execution/list_executions/cancel/resume`. It operates on saved workflows and grants no authoring rights. The runtime `dsh-runflow` skill guides capability discovery. Unloading unregisters the tool and skill, and cached calls recheck live service availability. User-maintained skill files are left intact.
-
-Authoring capabilities are injected only into the default `cordis` creation-mode scope. Normal conversations and other presets cannot see them:
-
-| Tool / Skill | Purpose |
-| --- | --- |
-| `runflow_node` | Node Provider `list/get/create/update/delete_draft/test/commit/delete_persisted` |
-| `runflow_workflow` | Workflow CRUD, node-instance CRUD, and `run/get_execution/list_executions/cancel` |
-| `dsh-runflow-node-development` | Guides an Agent through author → test → revise → persist |
-| `run_code` | Enabled only in that preset scope when creation mode has no Code transport |
-
-The node development loop is deliberately test-gated:
-
-1. Use `runflow_node(list/get)` to inspect existing Providers and avoid replacing built-in or plugin nodes.
-2. `create` or `update` writes `nodes/.drafts/<type>.node.json` and hot-loads the draft into memory.
-3. `test` creates a single-node workflow and executes it in the real RunFlow engine through the current Agent's `run_code`.
-4. Inspect `outputPorts`, `logs`, `error`, `outputDir`, and `artifacts`; every content change creates a new revision that must be tested again.
-5. `commit` atomically writes `nodes/<type>.node.json` only when the current content-hash revision has a `SUCCESS` test.
-
-Set `enableAuthoringTools: false` to disable authoring completely, or point `authoringPresetId` to another explicit creation preset.
-
-## Author hot-reloadable Node and Script plugins
-
-Both `*.node.ts` and `*.script.ts` files are trusted Cordis child plugins. They receive the real Host `ctx` and complete TypeScript/WebStorm inference:
-
-```ts
-import { defineRunFlowNodePlugin } from 'dsh-runflow'
-
-export default defineRunFlowNodePlugin({
-  inject: ['llm'],
-  node: {
-    type: 'example.transform',
-    title: 'Transform',
-    description: 'Transform incoming JSON',
-    category: 'data',
-    group: 'Example/Data transforms',
-    color: '#4A5FA8',
-    icon: 'braces',
-    inputs: [{ id: 'source', type: 'json', required: true }],
-    outputs: [{ id: 'result', type: 'json' }],
-  },
-  async execute(ctx, execution) {
-    execution.signal.throwIfAborted()
-    execution.log('transform started')
-    await execution.writeIntermediate('normalized-input', execution.inputs.source ?? null)
-    return execution.inputs.source ?? null
-  },
-})
-```
-
-A normal single-output node can directly `return value`. Multiple outputs require an explicit envelope so ordinary business objects are never mistaken for port maps:
-
-```ts
-return {
-  $runflow: 'port-outputs',
-  outputs: {
-    records: [{ id: 1 }],
-    summary: '1 record',
-  },
-}
-```
-
-Bundled executable examples include:
-
-- `demo.context-probe` for live Agent / Provider context;
-- `demo.multi-output` for typed multiple outputs and intermediate artifacts;
-- `demo.run-code-channel` for asynchronous DSH `run_code` channel waits;
-- `agent.generated-normalizer` and `agent.generated-ctx-script` for source API and hot-reload integration tests.
-
-## Script Channel
-
-`script.javascript` never uses `eval`. It submits code to the DSH `run_code` transport visible to the current Agent, preserving approval, audit, tool-policy, and cancellation behavior.
-
-`ctx.flowScript.submit()` returns `{ requestId, result }`; callers can also await `ctx.flowScript.wait(requestId, signal)`:
-
-```text
-queued → running → success | error | cancelled
-```
-
-Terminal results include `value`, `logs`, structured `error`, queue/execution timing, `transport: run_code`, language, and agentId. Cancelling a waiter does not cancel the underlying request; the submitting request's `AbortSignal` owns that task.
-
-## Typed ports and multiple outputs
-
-- Supported types: `any/flow/json/text/number/boolean/file/files/image/audio/table/error`. Trigger `flow` signals carry business input; state control nodes can read their payload.
-- `flow` connects only to `flow`. Known data types connect to the same type or an explicit `any` data input; an `any` output connects only to `any`, with no implicit conversion to concrete types. Frontend and Host share this policy.
-- Edges route through `sourcePort` / `targetPort`. DAGs reject occupied single inputs and cycles; state graphs retain message-based multiple incoming edges, while multiple messages reaching a single input in one step can still fail at runtime.
-- Legacy nodes without port declarations remain described as `any input/output` and follow the same rules. Control nodes preserve the old `input` ID for `flow` and offer an optional `data` input where supported; for example, connect `state.read.output` to `control.end.data`.
-- Every named output has its own preview and Details entry, which fits naturally multi-result HTTP, condition, Agent, and collection nodes.
-
-Previously accepted connections that relied on loose typing are not silently rewritten. Reconnect to the appropriate port or use a node with an explicit conversion and output type; see the [compatibility guide](./docs/STATE_GRAPH_GUIDE.md#端口形状类型与旧图兼容).
-
-RunFlow intentionally uses a lightweight “static port descriptor + runtime JSON value” model. It does not yet adopt ComfyUI-style dynamic ports, implicit conversion, widget-as-input, lazy evaluation, or binary object storage. This keeps protocol, migration, and debugging cost controlled while leaving room for evidence-driven extensions.
-
-## Data and output layout
-
-Runtime-owned state is isolated from the DSH checkout and plugin installation:
+Runtime data defaults to a location outside the plugin and DSH checkouts:
 
 ```text
 ~/.dsh_agent_workflow/
-├─ data/
-│  ├─ workflows/
-│  │  └─ <workflow-id>-<hash>.workflow.json
-│  └─ executions/
-│     └─ <execution-id>-<hash>.execution.json
-└─ output/
+├─ data/workflows/    # One file per Workflow
+├─ data/executions/   # One file per Execution
+└─ output/           # Per-run records and artifacts
 ```
 
-Output directory precedence is: one-off `run/test.outputDir` → workflow `outputDir` → plugin `outputDir` → `~/.dsh_agent_workflow/output`.
+| Configuration | Default / purpose |
+| --- | --- |
+| `maxParallelNodes` / `defaultTimeoutMs` | `4` / `30000`, concurrency and node timeout |
+| `storageDir` / `outputDir` | The data / output roots above |
+| `workflowsDir` / `executionsDir` | Separate overrides for each file repository |
+| `nodesDir` / `scriptsDir` | The plugin's nodes / script directories |
+| `watchFiles` | `true`, watches workflow and Provider files |
+| `enableAuthoringTools` / `authoringPresetId` | `true` / `cordis` |
+| `enableWebhooks` / `apiPrefix` | `true` / `/api/runflow`; a live authorized binding is still required |
 
-Each execution receives an isolated directory:
+Mode, entries, state, and step limits belong to the Workflow's `execution` configuration. A per-run output directory overrides the Workflow directory, then the plugin default. Webhook input cannot choose those execution permissions or paths.
 
-```text
-<base>/<workflow-id>/<timestamp>-<execution-id>/
-├─ workflow.json
-├─ execution.json
-├─ nodes/
-│  └─ <node-id>/
-│     ├─ input.json
-│     ├─ input-ports.json
-│     ├─ output.json
-│     ├─ logs.json
-│     └─ error.json
-└─ intermediate/
-   └─ <node-id>/
-      └─ 001-<label>.json
-```
+## Current boundaries
 
-Backend v2 no longer maintains `workspace.json` and intentionally provides no migration for development-state data. Each workflow and execution has one authoritative file written with a temporary file plus atomic rename. Explicit `storageDir`, `workflowsDir`, `executionsDir`, and `outputDir` values are always respected.
+- Schedule, DSH Event, and standalone `dsh.llm` are not implemented. Model tasks use an available `dsh.agent`.
+- Webhooks require the existing Host web service, Bearer authentication, and a live Agent binding. There is no durable delivery, deduplication, or automatic retry queue.
+- State is JSON with `replace / append / sum / merge` reducers and at most 1000 state-graph steps. Executable subflows currently support one level.
+- Pause/resume is not arbitrary crash recovery. External effects have no exactly-once guarantee; retries depend on node-specific idempotency.
+- File persistence targets one Host process. Early development data formats have no general migration layer.
+- `pnpm dev` is a layout and interaction preview; real execution is unavailable when disconnected from the Host.
 
-## Configuration
-
-| Option | Default | Description |
-| --- | --- | --- |
-| `maxParallelNodes` | `4` | Maximum runnable nodes per batch, from 1 to 64 |
-| `defaultTimeoutMs` | `30000` | Default node timeout, from 100 to 3,600,000ms |
-| `outputDir` | `~/.dsh_agent_workflow/output` | Default execution output root |
-| `storageDir` | `~/.dsh_agent_workflow/data` | Parent directory for v2 repositories |
-| `workflowsDir` | `<storageDir>/workflows` | File-backed workflow directory |
-| `executionsDir` | `<storageDir>/executions` | File-backed execution history directory |
-| `nodesDir` | `<plugin>/nodes` | Node Provider and draft directory |
-| `scriptsDir` | `<plugin>/script` | Script Provider directory |
-| `watchFiles` | `true` | Watch workflow, Node, and Script files |
-| `enableAuthoringTools` | `true` | Install creation-mode tools and skill |
-| `authoringPresetId` | `cordis` | Preset scope that receives authoring capabilities |
-| `enableWebhooks` | `true` | Register ingress when the existing Host `webServer` is available; each workflow still needs a live binding |
-| `apiPrefix` | `/api/runflow` | Host path prefix; bindings use `<apiPrefix>/webhooks/<binding-id>` |
-
-State-graph settings belong to the workflow's `execution` object: `mode: "state-graph"`, `entryNodeIds`, `initialState`, `reducers`, and `maxSteps` (default 100, range 1–1000). These are not plugin options. Webhook credentials and live bindings are not stored in workflow files.
-
-## Capability status
-
-| Node | Status | Implementation |
-| --- | --- | --- |
-| `trigger.manual` | Executable | Manual Host entry for DAGs and state graphs |
-| `trigger.agent` | Executable | Runtime-tool entry for the current live Agent |
-| `control.branch` / `control.switch` | State-graph executable | One conditional route, or up to four ordered rules plus a default route |
-| `control.parallel` / `control.join` | State-graph executable | Fixed parallel branches; Join awaits a fresh message on every incoming edge |
-| `control.loop` | State-graph executable | Condition and iteration bound, also subject to the graph step limit |
-| `state.read` / `state.update` | State-graph executable | Shared JSON state with replace / append / sum / merge reducers |
-| `control.interrupt` / `control.end` | State-graph executable | Persisted pause and authorized resume; finish the current branch |
-| `builtin.condition` | Executable | Conditional routing |
-| `builtin.set` | Executable | Field mapping and transformation |
-| `builtin.switch` | Executable | Named match/fallback multi-output routing |
-| `builtin.sort` | Executable | Sort JSON arrays by nested fields |
-| `builtin.aggregate` | Executable | count / sum / average / min / max |
-| `builtin.json-parse` / `builtin.json-stringify` | Executable | Typed text/JSON conversion |
-| `builtin.wait` / `builtin.stop-error` | Executable | Cancellable wait and explicit failure |
-| `dsh.agent` | Executable | `ctx.subagents.start()` with dynamic Provider / Model |
-| `script.javascript` | Executable | `ctx.flowScript` → DSH `run_code` |
-| `http.request` | Executable | Host `fetch()` with method, headers, and JSON/string body |
-| `storage.write` | Executable | Persists into the execution's `intermediate/` and returns a receipt |
-| `trigger.webhook` | Conditionally available | Host web service, live Agent binding, POST JSON, and Bearer authentication |
-| `trigger.schedule` | Not implemented | Waiting for a Host scheduler provider |
-| `trigger.dsh-event` | Not implemented | Waiting for a DSH event listener provider |
-| `dsh.llm` | Not implemented | Use the fully permission-integrated `dsh.agent` for AI work |
-
-## Development and verification
+## Development and contributing
 
 ```powershell
-pnpm install
-pnpm dev       # standalone UI preview; no Host connection
-pnpm check     # typecheck + tests + Host/client build
+pnpm dev        # Standalone UI preview
+pnpm typecheck  # Host and client type checks
+pnpm test       # Automated tests
+pnpm check      # Type checks, tests, and full build
 ```
 
-Build outputs:
+Build outputs are `lib/index.js` for the Host, `lib/client.js` for DSH's client, and `preview-dist/` for the standalone preview. Use `pnpm build:plugin` to rebuild only the plugin.
 
-- `lib/index.js`: DSH Host / Cordis plugin;
-- `lib/client.js`: DSH Web client;
-- `preview-dist/`: standalone UI preview.
+The Vite preview separates React and React Flow into a cacheable `editor-vendor` chunk, with application code separate. The default 500 kB warning threshold remains unchanged. First visits still load both chunks, so total download size is broadly unchanged. DSH's client is built separately by tsdown and keeps the Host's single-module loading contract.
 
-Key directories:
+Contributions should describe the triggering case, expected behavior, and verification. Changes to ports or scheduling need behavior regressions and legacy compatibility checks. Verify UI changes in real DSH; keep credentials and personal session content out of screenshots.
 
-```text
-nodes/                  Node executor, drafts, persisted Providers, Host Node plugins
-script/                 Script executor, run_code channel, Host Script plugins
-src/authoring-tools.ts  Creation-mode scoped tools and skill
-src/runtime-tools.ts    Normal Agent run, inspect, cancel, and resume tools
-src/runtime-skills.ts   Plugin-owned runtime guidance
-src/webhook-ingress.ts  Authenticated ingress on the existing Host HTTP service
-src/directory-plugin-loader.ts  Content hashing and serial hot reload
-src/engine.ts           Typed-port validation, DAG, retry / timeout / cancel
-src/state-graph.ts      Step scheduling, reducers, checkpoints, and pause/resume
-examples/workflows/    Bounded loop, parallel reduction, and webhook review examples
-src/flow-service.ts     v2 application facade, execution coordination, Provider snapshot
-src/backend/v2/         Workflow/Execution repositories and DSH Agent adapter
-src/remote-service.ts   Agent-authorized start / poll / cancel Remote
-src/client/             Floating workspace, canvas, Inspector, Details UI
-```
+Further reading: [Product](./PRODUCT.md) · [Capability map](./docs/CAPABILITY_MAP.md) · [Architecture refactor](./docs/REFACTOR_REPORT.md) · [Blueprint verification](./docs/BLUEPRINT_EXECUTION_REPORT.md) · [UI review](./docs/BLUEPRINT_EXECUTION_UI_AUDIT.md) · [Security review](./docs/BLUEPRINT_SECURITY_REVIEW.md).
 
-## Brand assets
-
-The central play node represents execution. The branching traces represent DAG routing, multiple outputs, and Agent delegation. The primary colors follow the DSH blue family, with cyan endpoints highlighting observable outputs.
-
-- Full logo: [`docs/assets/dsh-runflow-logo.svg`](./docs/assets/dsh-runflow-logo.svg)
-- Mark: [`docs/assets/dsh-runflow-mark.svg`](./docs/assets/dsh-runflow-mark.svg)
-- Favicon: [`public/favicon.svg`](./public/favicon.svg)
-- Visual system: [`design-system/dsh-runflow/MASTER.md`](./design-system/dsh-runflow/MASTER.md)
+Brand assets: [Logo](./docs/assets/dsh-runflow-logo.svg) · [Mark](./docs/assets/dsh-runflow-mark.svg) · [Design guide](./design-system/dsh-runflow/MASTER.md).
 
 ## License
 

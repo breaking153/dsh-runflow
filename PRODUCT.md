@@ -12,11 +12,11 @@ DSH users who ask an AI Agent to assemble executable workflows, then inspect, ad
 
 ## Product Purpose
 
-DSH RunFlow turns DSH Agent, tool, script, and Cordis node capabilities into persistent visual DAGs and optional state graphs with bounded loops, shared state, and explicit pause/resume. AI authors the first useful draft; the user remains the final reviewer and can make focused visual or parameter edits before execution.
+DSH RunFlow turns DSH Agent, tool, script, and Cordis node capabilities into persistent visual workflows. New workflows use a state graph with Blueprint semantics: flow ports control effectful operations, while pure nodes supply data on demand. Bounded loops, shared state and explicit pause/resume support repeatable tasks. AI can draft a workflow; users can inspect and adjust it before execution. Review is a recommended working practice, not an automatic approval gate for every saved definition.
 
 ## Positioning
 
-RunFlow is not a standalone browser automation server. It is a DSH-native workflow surface: child Agents reuse live Harness providers, JavaScript executes through the parent Agent's `run_code`, and trusted Node/Script Cordis plugins receive the Host `ctx` directly.
+RunFlow is a workflow surface inside DSH: child Agents reuse live Harness providers, JavaScript executes through the parent Agent's `run_code`, and trusted Node/Script Cordis plugins receive the Host `ctx` directly. Developers and automation users can inspect execution order, parameter sources and saved results in the same workspace.
 
 ## Operating Context
 
@@ -34,18 +34,19 @@ RunFlow is not a standalone browser automation server. It is a DSH-native workfl
 - Saved workflows are durable files and autosave after meaningful edits; there is no publish lifecycle.
 - The frontend follows the active DSH Chinese or English locale.
 - Frontend v2 must depend on a versioned Host gateway so backend v2 can replace the transport without restructuring UI features.
-- Definitions without execution settings remain legacy DAGs. State graphs opt in through `execution.mode`; this extension requires no migration of current v2 files. Earlier development formats still have no migration layer.
+- New workflows default to `execution.mode: 'state-graph'`, `execution.semantics: 'blueprint'` and `maxSteps: 100`. Definitions without execution settings remain legacy DAGs; missing semantics retain the existing runtime behavior. Earlier development formats still have no migration layer.
+- Typed text, number, boolean and JSON values and `state.get` are pure inputs. Properties can be promoted to typed data ports with saved fallback values. Multiple Trigger calls can share a flow input; explicit Join nodes coordinate branches within one call.
 - State graphs use JSON state, fixed reducers, bounded steps, and explicit checkpoints. They do not claim LangGraph API compatibility, arbitrary crash recovery, or exactly-once side effects.
 - Runtime tools, skills, and webhook routes follow plugin lifecycle and recheck availability. Disabling the plugin does not delete user-maintained skill files.
 - Webhook bindings expire with the Host/plugin or live owner. There is no durable delivery queue, retry, or deduplication guarantee.
 
 ## Brand Commitments
 
-The product name is DSH RunFlow. Preserve the DSH blue family, the existing RunFlow logo, restrained developer-tool styling, and familiar workflow-editor interaction patterns. n8n and ComfyUI are interaction references, not visual skins to copy.
+The product name is DSH RunFlow. Its mark uses two input paths converging into a forward arrow, with the same geometry in the shared React icon, favicon and documentation SVG. Preserve the DSH blue family, graphite workbench, restrained developer-tool styling and familiar workflow-editor interaction patterns. n8n, ComfyUI and Unreal Engine Blueprints inform interaction patterns without dictating a copied visual skin.
 
 ## Evidence on Hand
 
-The repository contains a runnable DSH client integration, real Host Remote calls, executable built-in nodes, hot-loaded Node/Script providers, automated client tests, and browser screenshots under `output/playwright/`. No production customer claims or performance benchmarks are available and none should be invented.
+The repository contains a runnable DSH client integration, real Host Remote calls, executable built-in nodes, hot-loaded Node/Script providers, automated client tests, and browser screenshots under `docs/assets/evidence/playwright/`. Four [credential-free demos](docs/DEMOS.md) cover data processing, conditions, shared HTTP and loop/approval flows; their actual DSH Web results are recorded in the [presentation verification report](docs/PRESENTATION_REFRESH.md). No production customer claims or performance benchmarks are available and none should be invented.
 
 ## Product Principles
 

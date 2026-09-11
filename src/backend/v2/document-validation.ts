@@ -1,4 +1,5 @@
 import type { WorkflowDefinition, WorkflowExecution } from '../../contracts.ts'
+import { validPromotedInputs } from '../../node-properties.ts'
 
 type Check = (value: unknown) => boolean
 
@@ -20,6 +21,7 @@ const position = shape({ x: number, y: number })
 const node = shape({
   id: identifier, type: identifier, config: record,
   name: optional(text), position: optional(position), disabled: optional(boolean),
+  promotedInputs: optional(validPromotedInputs),
 })
 const edge = shape({
   from: identifier, to: identifier, id: optional(text),
@@ -52,6 +54,7 @@ const workflow = shape({
   outputDir: optional(text), createdAt: optional(text), updatedAt: optional(text), ui: optional(ui),
   execution: optional(shape({
     mode: oneOf('dag', 'state-graph'), entryNodeIds: optional(array(identifier)),
+    semantics: optional(oneOf('blueprint')),
     maxSteps: optional(value => nonnegative(value) && (value as number) > 0),
     initialState: optional(record), reducers: optional(values(oneOf('replace', 'append', 'sum', 'merge'))),
   })),
@@ -66,6 +69,8 @@ const log = shape({ timestamp: text, level: oneOf('debug', 'info', 'warn', 'erro
 const nodeExecution = shape({
   nodeId: identifier, status: oneOf('WAITING', 'RUNNING', 'PAUSED', 'SUCCESS', 'FAILED', 'SKIPPED', 'CANCELLED'),
   step: optional(nonnegative), iteration: optional(nonnegative),
+  callId: optional(identifier),
+  evaluatedFor: optional(identifier),
   attempts: number, inputPorts: optional(record), outputPorts: optional(record), error: optional(text),
   logs: optional(array(log)), artifacts: optional(array(artifact)),
   startedAt: optional(text), finishedAt: optional(text), durationMs: optional(number),
@@ -74,12 +79,14 @@ const stepRecord = shape({ step: nonnegative, nodes: array(nodeExecution), state
 const activation = shape({
   nodeId: identifier, edgeIndex: optional(nonnegative), from: optional(text),
   sourcePort: optional(text), targetPort: optional(text), value: value => value !== undefined,
+  call: optional(shape({ id: identifier, outputs: values(record) })),
 })
 const checkpoint = shape({
   schemaVersion: value => value === 1, workflowId: identifier, workflowVersion: nonnegative,
+  semantics: optional(oneOf('blueprint')),
   executionId: identifier, step: nonnegative, state: record, pending: array(activation),
   joins: values(array(activation)), iterations: values(nonnegative), nodes: array(nodeExecution),
-  steps: array(stepRecord), lastOutputs: record, lastPortOutputs: values(record), interrupts: record,
+  steps: array(stepRecord), lastOutputs: record, lastPortOutputs: values(record), lastTerminalOutputs: optional(record), interrupts: record,
   startedAt: optional(text),
 })
 const execution = shape({

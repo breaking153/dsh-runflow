@@ -1,0 +1,25 @@
+{
+  "id": "demo-loop-approval",
+  "name": "Demo 04 · 循环与确认 / Loop and approval",
+  "version": 1,
+  "execution": {
+    "mode": "state-graph", "semantics": "blueprint", "maxSteps": 20,
+    "initialState": { "count": 0 }, "reducers": { "count": "sum" }
+  },
+  "nodes": [
+    { "id": "demo-loop-start", "type": "trigger.manual", "name": "开始 / Start", "config": {}, "position": { "x": 40, "y": 100 } },
+    { "id": "demo-loop-counter", "type": "control.loop", "name": "最多三次 / Bounded Loop", "config": { "maxIterations": 3, "source": "state", "path": "count", "operator": "lessThan", "value": 3 }, "position": { "x": 360, "y": 100 } },
+    { "id": "demo-loop-increment", "type": "state.update", "name": "计数加一 / Increment", "config": { "key": "count", "source": "value", "value": 1 }, "position": { "x": 360, "y": 420 } },
+    { "id": "demo-loop-approval", "type": "control.interrupt", "name": "等待确认 / Pause for Input", "config": { "prompt": "已完成三次计数。请输入 JSON true 或 false 并恢复运行。 / Three increments completed. Resume with JSON true or false.", "stateKey": "approved" }, "position": { "x": 730, "y": 100 } },
+    { "id": "demo-loop-result", "type": "state.get", "name": "最终状态 / Final state", "config": { "path": "" }, "position": { "x": 730, "y": 420 } },
+    { "id": "demo-loop-end", "type": "control.end", "name": "返回状态 / Result", "config": {}, "position": { "x": 1100, "y": 100 } }
+  ],
+  "edges": [
+    { "id": "demo-loop-start-counter", "from": "demo-loop-start", "to": "demo-loop-counter", "sourcePort": "output", "targetPort": "input" },
+    { "id": "demo-loop-continue-increment", "from": "demo-loop-counter", "to": "demo-loop-increment", "sourcePort": "continue", "targetPort": "input" },
+    { "id": "demo-loop-increment-counter", "from": "demo-loop-increment", "to": "demo-loop-counter", "sourcePort": "output", "targetPort": "input" },
+    { "id": "demo-loop-done-approval", "from": "demo-loop-counter", "to": "demo-loop-approval", "sourcePort": "done", "targetPort": "input" },
+    { "id": "demo-loop-approval-end", "from": "demo-loop-approval", "to": "demo-loop-end", "sourcePort": "output", "targetPort": "input" },
+    { "id": "demo-loop-result-end", "from": "demo-loop-result", "to": "demo-loop-end", "sourcePort": "output", "targetPort": "data" }
+  ]
+}

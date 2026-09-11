@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
   Background, BackgroundVariant, ConnectionMode, MiniMap, ReactFlow, ReactFlowProvider,
-  SelectionMode, useReactFlow, type Connection, type ConnectionLineComponentProps, type IsValidConnection, type NodeTypes, type OnConnectEnd,
+  SelectionMode, useNodesInitialized, useReactFlow, type Connection, type ConnectionLineComponentProps, type IsValidConnection, type NodeTypes, type OnConnectEnd,
 } from '@xyflow/react'
 import {
   Activity, ArrowLeft, ChevronDown, CircleAlert, Clock3, Copy, Download,
@@ -277,7 +277,9 @@ export function EditorHeader({ onTemplates, onKeybindings }: { onTemplates(): vo
 
 function CanvasEditor() {
   const { t, language } = useRunFlowLocale()
+  const workflowId = useFlowStore(state => state.workflowId)
   const mode = useFlowStore(state => state.workflowExecution?.mode ?? 'dag')
+  const semantics = useFlowStore(state => state.workflowExecution?.semantics)
   const nodes = useFlowStore(state => state.nodes)
   const edges = useFlowStore(state => state.edges)
   const onNodesChange = useFlowStore(state => state.onNodesChange)
@@ -312,7 +314,20 @@ function CanvasEditor() {
   const run = useFlowStore(state => state.run)
   const cancelRun = useFlowStore(state => state.cancelRun)
   const running = useFlowStore(state => state.running)
-  const { fitView, screenToFlowPosition, zoomIn, zoomOut } = useReactFlow()
+  const { fitView, screenToFlowPosition, zoomIn, zoomOut, viewportInitialized } = useReactFlow()
+  const nodesInitialized = useNodesInitialized()
+  const graphIdentity = JSON.stringify([workflowId, activeSubflowId])
+  const fittedGraph = useRef<string>()
+  useEffect(() => {
+    if (!nodesInitialized || !viewportInitialized || fittedGraph.current === graphIdentity) return
+    let cancelled = false
+    const frame = window.requestAnimationFrame(() => {
+      void fitView({ duration: 0, padding: .23, maxZoom: 1.1 }).then(fitted => {
+        if (fitted && !cancelled) fittedGraph.current = graphIdentity
+      })
+    })
+    return () => { cancelled = true; window.cancelAnimationFrame(frame) }
+  }, [graphIdentity, nodesInitialized, viewportInitialized, fitView])
   const [creator, setCreator] = useState<CreatorRequest>()
   const [menu, setMenu] = useState<CanvasMenuState>()
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
@@ -348,7 +363,7 @@ function CanvasEditor() {
     const source = ports?.find(port => port.id === edge.sourceHandle) ?? ports?.[0]
     return { ...edge, hidden: !linksVisible, type: 'default', style: { ...edge.style, stroke: PORT_COLORS[source?.type ?? 'any'], strokeWidth: edge.selected ? 2.75 : 2 } }
   }), [edges, linksVisible, edgeColors])
-  const validateConnection = (connection: Parameters<IsValidConnection>[0]): ConnectionValidation => validateNodeConnection(nodes, connection, { mode, edges })
+  const validateConnection = (connection: Parameters<IsValidConnection>[0]): ConnectionValidation => validateNodeConnection(nodes, connection, { mode, semantics, edges })
   const validConnection: IsValidConnection = connection => validateConnection(connection).ok
   const connectNodes = (connection: Connection): void => {
     const result = validateConnection(connection)
@@ -363,7 +378,7 @@ function CanvasEditor() {
     if (!state.fromNode) return
     if (state.isValid === true) { setConnectionFeedback(undefined); return }
     if (state.toNode !== null) {
-      setConnectionFeedback(state.toHandle === null ? { ok: false, reason: 'missing-port' } : validateDraggedConnection(nodes, { nodeId: state.fromNode.id, handleId: state.fromHandle.id ?? null, type: state.fromHandle.type }, { nodeId: state.toNode.id, handleId: state.toHandle.id ?? null, type: state.toHandle.type }, { mode, edges }))
+      setConnectionFeedback(state.toHandle === null ? { ok: false, reason: 'missing-port' } : validateDraggedConnection(nodes, { nodeId: state.fromNode.id, handleId: state.fromHandle.id ?? null, type: state.fromHandle.type }, { nodeId: state.toNode.id, handleId: state.toHandle.id ?? null, type: state.toHandle.type }, { mode, semantics, edges }))
       return
     }
     const eventTarget = event.target
@@ -521,8 +536,6 @@ function CanvasEditor() {
         multiSelectionKeyCode={['Meta', 'Control']}
         panOnDrag={[1, 2]}
         panActivationKeyCode={null}
-        fitView
-        fitViewOptions={{ padding: .23, maxZoom: 1.1 }}
         minZoom={.3}
         maxZoom={1.8}
         snapToGrid

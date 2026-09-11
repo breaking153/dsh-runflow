@@ -37,7 +37,7 @@ pnpm --dir "$env:USERPROFILE\.dsh\profiles\web" run web
 - Enhanced Settings 的真实 GET/PUT 路由读取会话选项，将工具展示改为 `native`，revision 从 0 增至 1；使用旧 revision 写入返回 409。
 - 最终使用正式 profile 内安装的 CLI、相同隔离 home 和端口 `18944` 再次启动，重复上述两个插件的真实 API 验证，结果通过。验证结束后关闭本任务创建的临时 Host。
 
-截图：[RunFlow](../output/playwright/dsh-015-runflow.png)、[增强设置](../output/playwright/dsh-015-enhanced-settings.png)。首次打开空白 Host 时 RunFlow 要求选择主会话，这是已有行为；真实执行验证使用隔离环境创建的主会话。
+截图：[RunFlow](assets/evidence/playwright/dsh-015-runflow.png)、[增强设置](assets/evidence/playwright/dsh-015-enhanced-settings.png)。首次打开空白 Host 时 RunFlow 要求选择主会话，这是已有行为；真实执行验证使用隔离环境创建的主会话。
 
 ## 主线同步复核
 

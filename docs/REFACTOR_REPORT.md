@@ -78,7 +78,7 @@
 
 修复了紧凑样式覆盖移动端 header 高度、关闭的 Inspector 占据画布宽度，以及嵌套 Inspector 继承旧绝对定位遮住关闭按钮的问题。375 像素下打开 Inspector 后画布仍为 327 像素，关闭按钮可实际点击；模拟浏览器存储配额故障后，错误可见，工具栏位于 header 之后，没有遮挡。未保存状态明确显示“未保存”，本地缓存显示“本地草稿”，适应画布尊重减少动画设置。
 
-界面证据：[桌面编辑器](../output/playwright/fullstack-refactor/editor-1440.png)、[窄屏编辑器](../output/playwright/fullstack-refactor/editor-375.png)、[窄屏保存失败](../output/playwright/fullstack-refactor/save-failure-375.png)。
+界面证据：[桌面编辑器](assets/evidence/playwright/fullstack-refactor/editor-1440.png)、[窄屏编辑器](assets/evidence/playwright/fullstack-refactor/editor-375.png)、[窄屏保存失败](assets/evidence/playwright/fullstack-refactor/save-failure-375.png)。
 
 ### 兼容与迁移
 

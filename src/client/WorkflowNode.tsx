@@ -1,12 +1,13 @@
-import { Handle, Position, useConnection, useNodeConnections, type NodeProps } from '@xyflow/react'
+import { Handle, Position, useConnection, useNodeConnections, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
 import { Check, CircleAlert, Expand, LoaderCircle, Pause } from 'lucide-react'
 import { memo, useEffect, useRef, useState, type CSSProperties } from 'react'
-import type { JsonValue, WorkflowPortDescriptor } from '../contracts.ts'
+import type { JsonValue } from '../contracts.ts'
 import type { FlowNode } from './store.ts'
 import { useFlowStore } from './store.ts'
 import { NodeIcon } from './catalog.tsx'
 import { useRunFlowLocale, type RunFlowLocaleKey } from './locale.ts'
 import { PORT_COLORS } from './port-presentation.ts'
+import type { EditorPortDescriptor } from './property-ports.ts'
 
 const statusCopy: Record<FlowNode['data']['status'], RunFlowLocaleKey> = {
   WAITING: 'ready', RUNNING: 'running', SUCCESS: 'success',
@@ -29,7 +30,7 @@ function previewText(value: JsonValue | undefined, empty: string): string {
 
 export const PortRow = memo(function PortRow({ nodeId, port, direction, value }: {
   nodeId: string
-  port: WorkflowPortDescriptor
+  port: EditorPortDescriptor
   direction: 'input' | 'output'
   value: JsonValue | undefined
 }) {
@@ -61,6 +62,7 @@ export const PortRow = memo(function PortRow({ nodeId, port, direction, value }:
         type={target ? 'target' : 'source'}
         position={target ? Position.Left : Position.Right}
         aria-label={(target ? t('input') : t('outputs')) + ' ' + port.id + ' · ' + port.type}
+        isConnectable={port.unavailable !== true}
       >{port.type === 'flow' && <span className="pin-core" aria-hidden="true" />}</Handle>
       <button
         type="button"
@@ -73,7 +75,7 @@ export const PortRow = memo(function PortRow({ nodeId, port, direction, value }:
         }}
         aria-label={(language === 'zh' ? '查看引脚数据 ' : 'Inspect port data ') + port.id}
       >
-        <span>{port.label ?? port.id}</span>
+        <span>{port.unavailable && <CircleAlert size={11} aria-label={t('propertyPinUnavailable')} />}{port.label ?? port.id}</span>
         {(port.label ?? port.id) !== port.type && <em>{port.type}</em>}
       </button>
       {preview && !connecting && (
@@ -91,29 +93,39 @@ export const WorkflowNode = memo(function WorkflowNode({ id, data, selected }: N
   const { t } = useRunFlowLocale()
   const openDetails = useFlowStore(state => state.openNodeDetails)
   const record = data.executionRecord
-  const executionFirst = (a: WorkflowPortDescriptor, b: WorkflowPortDescriptor) => Number(b.type === 'flow') - Number(a.type === 'flow')
+  const updateNodeInternals = useUpdateNodeInternals()
+  const kind = data.executionKind ?? 'effect'
+  const portSignature = JSON.stringify([kind, data.inputs.map(port => [port.id, port.type]), data.outputs.map(port => [port.id, port.type])])
+  useEffect(() => { updateNodeInternals(id) }, [id, portSignature, updateNodeInternals])
+  const kindLabel = t(kind === 'trigger' ? 'triggerNode' : kind === 'pure' ? 'pureNode' : 'actionNode')
+  const kindHint = t(kind === 'trigger' ? 'triggerNodeHint' : kind === 'pure' ? 'pureNodeHint' : 'actionNodeHint')
+  const constantValue = data.config.value === undefined ? data.valueDefault : data.config.value
   return (
-    <article className={'workflow-node ' + (selected ? 'is-selected' : '')} style={{ '--node-color': data.color } as CSSProperties}>
+    <article className={'workflow-node node-kind-' + kind + ' ' + (selected ? 'is-selected' : '')} style={{ '--node-color': data.color } as CSSProperties}>
       <div className="node-header">
         <span className="node-icon"><NodeIcon name={data.icon} size={18} /></span>
-        <span className="node-heading"><strong title={data.label}>{data.label}</strong><span className="node-type" title={data.nodeType}>{data.nodeType}</span></span>
+        <span className="node-heading"><strong title={data.label}>{data.label}</strong><span className="node-meta"><span className="node-kind" title={kindHint}>{kindLabel}</span><span className="node-type" title={data.nodeType}>{data.nodeType}</span></span></span>
         <span className={'node-status status-' + data.status.toLowerCase()} title={t(statusCopy[data.status])} aria-label={t(statusCopy[data.status])}>
           <StatusIcon status={data.status} />{data.status !== 'WAITING' && t(statusCopy[data.status])}
         </span>
       </div>
-      <div className="node-port-grid">
-        <div className="port-column input-column">
-          {[...data.inputs].sort(executionFirst).map(port => (
-            <PortRow key={port.id} nodeId={id} port={port} direction="input" value={record?.inputPorts?.[port.id]} />
-          ))}
+      {data.nodeType.startsWith('value.') && <code className="node-value-preview" title={previewText(constantValue, '')}>{data.promotedInputs?.includes('value') && <span>{t('fallbackValue')} · </span>}{previewText(constantValue, '—')}</code>}
+      {(['execution', 'data'] as const).map(lane => {
+        const inLane = (port: EditorPortDescriptor) => (port.type === 'flow') === (lane === 'execution')
+        const inputs = data.inputs.filter(inLane)
+        const outputs = data.outputs.filter(inLane)
+        if (inputs.length + outputs.length === 0) return null
+        return <div key={lane} className="node-port-grid" data-lane={lane} aria-label={t(lane === 'execution' ? 'executionPins' : 'dataPins')}>
+          <div className="port-column input-column">
+            {inputs.map(port => <PortRow key={port.id} nodeId={id} port={port} direction="input" value={record?.inputPorts?.[port.id]} />)}
+          </div>
+          <div className="port-column output-column">
+            {outputs.map(port => <PortRow key={port.id} nodeId={id} port={port} direction="output" value={record?.outputPorts?.[port.id]} />)}
+          </div>
         </div>
-        <div className="port-column output-column">
-          {[...data.outputs].sort(executionFirst).map(port => (
-            <PortRow key={port.id} nodeId={id} port={port} direction="output" value={record?.outputPorts?.[port.id]} />
-          ))}
-        </div>
-      </div>
+      })}
       {record !== undefined && <div className="node-footer">
+        {record.callId !== undefined && (record.iteration ?? 0) > 1 && <span className="node-visit-count">{t('nodeVisits', { count: record.iteration! })}</span>}
         <button
           type="button"
           className="node-details-button nodrag nopan"

@@ -91,12 +91,12 @@ Blueprint 是图编辑形态参考，没有复制 Unreal 源码、图标或纹�
 
 | 截图证据 | 内容 |
 | --- | --- |
-| [1440px](../output/playwright/blueprint-editor-1440.png)、[1024px](../output/playwright/blueprint-editor-1024.png)、[768px](../output/playwright/blueprint-editor-768.png)、[375px](../output/playwright/blueprint-editor-375.png) | 石墨色编辑器与四宽布局 |
-| [节点拖动](../output/playwright/blueprint-node-drag.png)、[分组调整尺寸](../output/playwright/blueprint-group-resize.png) | 手势中的画布与完成的分组尺寸 |
-| [错误数据连接](../output/playwright/blueprint-invalid-connection.png)、[flow 类型错误](../output/playwright/blueprint-flow-mismatch.png) | 即时红线与类型原因 |
-| [有效数据连接](../output/playwright/blueprint-valid-connection.png)、[反向 flow 连接](../output/playwright/blueprint-reverse-flow.png) | 合法连线预览与方向 |
-| [375px 运行设置](../output/playwright/blueprint-settings-375.png) | 小屏设置面板边界 |
-| [生产构建](../output/playwright/blueprint-production.png)、[测量记录](../output/playwright/blueprint-evidence.json) | 实际构建的错误连接状态及结构化验证结果 |
+| [1440px](assets/evidence/playwright/blueprint-editor-1440.png)、[1024px](assets/evidence/playwright/blueprint-editor-1024.png)、[768px](assets/evidence/playwright/blueprint-editor-768.png)、[375px](assets/evidence/playwright/blueprint-editor-375.png) | 石墨色编辑器与四宽布局 |
+| [节点拖动](assets/evidence/playwright/blueprint-node-drag.png)、[分组调整尺寸](assets/evidence/playwright/blueprint-group-resize.png) | 手势中的画布与完成的分组尺寸 |
+| [错误数据连接](assets/evidence/playwright/blueprint-invalid-connection.png)、[flow 类型错误](assets/evidence/playwright/blueprint-flow-mismatch.png) | 即时红线与类型原因 |
+| [有效数据连接](assets/evidence/playwright/blueprint-valid-connection.png)、[反向 flow 连接](assets/evidence/playwright/blueprint-reverse-flow.png) | 合法连线预览与方向 |
+| [375px 运行设置](assets/evidence/playwright/blueprint-settings-375.png) | 小屏设置面板边界 |
+| [生产构建](assets/evidence/playwright/blueprint-production.png)、[测量记录](assets/evidence/playwright/blueprint-evidence.json) | 实际构建的错误连接状态及结构化验证结果 |
 
 本轮没有有效的拖动延迟、帧率或端到端交互性能统计。脚本采集总耗时包含截图、其他操作和等待，不能用作节点拖动性能；报告仅记录实际几何和行为结果。
 

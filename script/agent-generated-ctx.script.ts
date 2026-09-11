@@ -8,10 +8,11 @@ export default defineRunFlowScriptPlugin({
     title: 'AI Generated Context Script',
     description: '由 AI 通过 RunFlow source API 生成，验证 Script 对 Host ctx 的调用。',
     category: 'action',
+    executionKind: 'effect', completionPort: 'flow',
     color: '#38BDF8',
     icon: 'file-code-2',
-    inputs: [{ id: 'input', label: 'input', type: 'any' }],
-    outputs: [{ id: 'result', label: 'result', type: 'json' }],
+    inputs: [{ id: 'input', label: 'input', type: 'any' }, { id: 'flow', type: 'flow' }],
+    outputs: [{ id: 'result', label: 'result', type: 'json' }, { id: 'flow', type: 'flow' }],
   },
   async execute(ctx, execution) {
     const result = {
@@ -19,7 +20,7 @@ export default defineRunFlowScriptPlugin({
       agentCount: ctx.agents.list().length,
       hotReloaded: true,
       nodeCount: ctx.flow.listNodes().length,
-      input: execution.input,
+      input: Object.hasOwn(execution.inputs, 'input') ? execution.inputs.input! : execution.input,
     }
     execution.log('AI script read ctx.agents and ctx.flow', {
       agentCount: result.agentCount,

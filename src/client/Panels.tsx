@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react'
 import { ArrowRight, Box, Copy, Group, LibraryBig, LoaderCircle, Play, Route, Search, Settings2, Trash2, X } from 'lucide-react'
 import type { JsonValue, NodeCategory, WorkflowNodeDescriptor } from '../contracts.ts'
-import { CATEGORY_LABELS, NodeIcon } from './catalog.tsx'
+import { CATEGORY_LABELS, NodeIcon, descriptorFor } from './catalog.tsx'
+import { AdditionalPropertyFields, PropertyContext, PropertyField } from './PropertyField.tsx'
 import { modelsForProvider, useFlowModelCatalog } from './model-catalog.ts'
 import { useFlowRuntime } from './runtime.ts'
 import { useFlowStore } from './store.ts'
@@ -9,6 +10,70 @@ import { WebhookSettings } from './WebhookSettings.tsx'
 import { StateGraphNodeConfig, isStateGraphNode } from './StateGraphNodeConfig.tsx'
 import { LightCodeEditor } from './LightCodeEditor.tsx'
 import { useRunFlowLocale } from './locale.ts'
+
+const specializedProperties: Record<string, string[]> = {
+  "http.request": [
+    "method",
+    "url"
+  ],
+  "trigger.schedule": [
+    "cron"
+  ],
+  "builtin.condition": [
+    "path",
+    "operator",
+    "value"
+  ],
+  "builtin.filter": [
+    "path",
+    "operator",
+    "value"
+  ],
+  "builtin.limit": [
+    "maxItems"
+  ],
+  "builtin.switch": [
+    "rules"
+  ],
+  "builtin.sort": [
+    "path",
+    "order"
+  ],
+  "builtin.aggregate": [
+    "operation",
+    "path"
+  ],
+  "builtin.json-stringify": [
+    "pretty"
+  ],
+  "builtin.wait": [
+    "durationMs"
+  ],
+  "builtin.stop-error": [
+    "message"
+  ],
+  "script.javascript": [
+    "description",
+    "code"
+  ],
+  "storage.write": [
+    "collection"
+  ],
+  "dsh.agent": [
+    "subagentProvider",
+    "label",
+    "agentOptions.provider",
+    "agentOptions.model",
+    "agentOptions.reasoningEffort",
+    "agentOptions.maxTokens",
+    "maxDepth",
+    "toolFilter.allow",
+    "toolFilter.deny",
+    "outputSchema",
+    "persona",
+    "prompt"
+  ]
+}
 
 export function NodePalette({ hidden = false, onClose, onNodeAdded }: { hidden?: boolean; onClose?(): void; onNodeAdded?(): void }) {
   const [query, setQuery] = useState('')
@@ -67,7 +132,8 @@ export function NodePalette({ hidden = false, onClose, onNodeAdded }: { hidden?:
   )
 }
 
-function ConfigField({ label, value, onChange, type = 'text', list, placeholder }: {
+function ConfigField({ label, value, onChange, type = 'text', list, placeholder, propertyKey }: {
+  propertyKey?: string
   label: string
   value: JsonValue | undefined
   onChange(value: JsonValue): void
@@ -76,8 +142,7 @@ function ConfigField({ label, value, onChange, type = 'text', list, placeholder 
   placeholder?: string
 }) {
   return (
-    <label className="field">
-      <span>{label}</span>
+    <PropertyField propertyKey={propertyKey} label={label}>
       <input
         type={type}
         inputMode={type === 'number' ? 'numeric' : undefined}
@@ -88,11 +153,12 @@ function ConfigField({ label, value, onChange, type = 'text', list, placeholder 
           ? Number(event.target.value)
           : event.target.value)}
       />
-    </label>
+    </PropertyField>
   )
 }
 
-function JsonConfigField({ label, value, onChange, placeholder, objectRoot = true }: {
+function JsonConfigField({ label, value, onChange, placeholder, objectRoot = true, propertyKey }: {
+  propertyKey?: string
   label: string
   value: JsonValue | undefined
   onChange(value: JsonValue | undefined): void
@@ -122,8 +188,7 @@ function JsonConfigField({ label, value, onChange, placeholder, objectRoot = tru
     }
   }
   return (
-    <label className="field">
-      <span>{label}</span>
+    <PropertyField propertyKey={propertyKey} label={label}>
       <textarea
         className={error === undefined ? undefined : 'field-invalid'}
         spellCheck={false}
@@ -133,11 +198,12 @@ function JsonConfigField({ label, value, onChange, placeholder, objectRoot = tru
         onBlur={commit}
       />
       {error !== undefined && <small className="field-error">JSON 无效：{error}</small>}
-    </label>
+    </PropertyField>
   )
 }
 
-function StringListField({ label, value, onChange, placeholder }: {
+function StringListField({ label, value, onChange, placeholder, propertyKey }: {
+  propertyKey?: string
   label: string
   value: JsonValue | undefined
   onChange(value: string[] | undefined): void
@@ -156,8 +222,7 @@ function StringListField({ label, value, onChange, placeholder }: {
     onChange(next.length === 0 ? undefined : next)
   }
   return (
-    <label className="field">
-      <span>{label}</span>
+    <PropertyField propertyKey={propertyKey} label={label}>
       <textarea
         className="compact-textarea"
         value={draft}
@@ -165,7 +230,7 @@ function StringListField({ label, value, onChange, placeholder }: {
         onChange={event => { setDraft(event.target.value) }}
         onBlur={commit}
       />
-    </label>
+    </PropertyField>
   )
 }
 
@@ -176,6 +241,7 @@ export function PropertyInspector({ hidden = false, onClose, showOutputTab = tru
   const modelCatalog = useFlowModelCatalog()
   const selectedNodeId = useFlowStore(state => state.selectedNodeId)
   const node = useFlowStore(state => state.nodes.find(item => item.id === selectedNodeId))
+  const nodeCatalog = useFlowStore(state => state.nodeCatalog)
   const updateNode = useFlowStore(state => state.updateNode)
   const removeNode = useFlowStore(state => state.removeNode)
   const duplicateNode = useFlowStore(state => state.duplicateNode)
@@ -271,12 +337,13 @@ export function PropertyInspector({ hidden = false, onClose, showOutputTab = tru
   const selectedModel = providerModels.find(model => model.id === modelId)
   const hasConfiguredAgentOptions = ['provider', 'model', 'reasoningEffort', 'maxTokens']
     .some(key => agentOptionValue(key) !== undefined && agentOptionValue(key) !== '')
+  const descriptor = nodeCatalog.find(item => item.type === type) ?? descriptorFor(type)
   const configuredSubagentProvider = String(node.data.config['subagentProvider'] ?? '')
   const effectiveSubagentProvider = configuredSubagentProvider || subagentProviders[0]?.id || ''
   const selectedSubagentProvider = subagentProviders.find(provider => provider.id === effectiveSubagentProvider)
 
   return (
-    <aside ref={inspectorRef} id="runflow-inspector" className={`flow-panel inspector ${hidden ? 'mobile-hidden' : ''}`} aria-label={t('inspector')}>
+    <PropertyContext.Provider value={{ nodeId: node.id, descriptor }}><aside ref={inspectorRef} id="runflow-inspector" className={`flow-panel inspector ${hidden ? 'mobile-hidden' : ''}`} aria-label={t('inspector')}>
       <div className="panel-heading"><span><strong>{t('inspector')}</strong><small>{t('inspectorHint')}</small></span><span className="panel-heading-actions"><span className="panel-kicker">{node.id}</span><button type="button" className="mobile-panel-close" onClick={onClose} aria-label={t('closeInspector')}><X size={15} /></button></span></div>
       <div className="inspector-scroll">
         <div className="inspector-node-head">
@@ -308,58 +375,58 @@ export function PropertyInspector({ hidden = false, onClose, showOutputTab = tru
           {isStateGraphNode(type) && <StateGraphNodeConfig key={node.id} type={type} config={node.data.config} onChange={config => updateNode(node.id, { config })} />}
           {type === 'trigger.agent' && <p className="model-catalog-note">{capabilities.triggers?.agent ? 'AI Agent 可通过 RunFlow 工具向此入口传入 JSON。' : '当前 Host 未开放 Agent 触发能力；工作流可继续编辑。'}</p>}
           {type === 'trigger.webhook' && <WebhookSettings triggerNodeId={node.id} />}
-          {type === 'trigger.schedule' && <ConfigField label="Cron Expression" value={node.data.config['cron'] ?? '0 8 * * *'} onChange={value => setConfig('cron', value)} />}
+          {type === 'trigger.schedule' && <ConfigField propertyKey="cron" label="Cron Expression" value={node.data.config['cron'] ?? '0 8 * * *'} onChange={value => setConfig('cron', value)} />}
           {type === 'http.request' && <>
-            <label className="field"><span>Method</span><select value={String(node.data.config['method'] ?? 'GET')} onChange={event => setConfig('method', event.target.value)}><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select></label>
-            <ConfigField label="URL" value={node.data.config['url']} onChange={value => setConfig('url', value)} />
+            <PropertyField propertyKey="method" label="Method"><select value={String(node.data.config['method'] ?? 'GET')} onChange={event => setConfig('method', event.target.value)}><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select></PropertyField>
+            <ConfigField propertyKey="url" label="URL" value={node.data.config['url']} onChange={value => setConfig('url', value)} />
           </>}
           {(type === 'builtin.condition' || type === 'builtin.filter') && <>
-            <ConfigField label="Input Path" value={node.data.config['path']} onChange={value => setConfig('path', value)} />
-            <label className="field"><span>Operator</span><select value={String(node.data.config['operator'] ?? 'equals')} onChange={event => setConfig('operator', event.target.value)}><option value="equals">Equals</option><option value="notEquals">Not equals</option><option value="contains">Contains</option><option value="greaterThan">Greater than</option></select></label>
-            <ConfigField label="Compare Value" value={node.data.config['value']} onChange={value => setConfig('value', value)} />
+            <ConfigField propertyKey="path" label="Input Path" value={node.data.config['path']} onChange={value => setConfig('path', value)} />
+            <PropertyField propertyKey="operator" label="Operator"><select value={String(node.data.config['operator'] ?? 'equals')} onChange={event => setConfig('operator', event.target.value)}><option value="equals">Equals</option><option value="notEquals">Not equals</option><option value="contains">Contains</option><option value="greaterThan">Greater than</option></select></PropertyField>
+            <ConfigField propertyKey="value" label="Compare Value" value={node.data.config['value']} onChange={value => setConfig('value', value)} />
           </>}
-          {type === 'builtin.limit' && <ConfigField label="Max Items" type="number" value={node.data.config['maxItems'] ?? 10} onChange={value => setConfig('maxItems', value)} />}
-          {type === 'builtin.switch' && <JsonConfigField label="Rules JSON" objectRoot={false} value={node.data.config['rules']} onChange={value => setOptionalConfig('rules', value)} placeholder={'[\n  { "path": "status", "operator": "equals", "value": "ready" }\n]'} />}
+          {type === 'builtin.limit' && <ConfigField propertyKey="maxItems" label="Max Items" type="number" value={node.data.config['maxItems'] ?? 10} onChange={value => setConfig('maxItems', value)} />}
+          {type === 'builtin.switch' && <JsonConfigField propertyKey="rules" label="Rules JSON" objectRoot={false} value={node.data.config['rules']} onChange={value => setOptionalConfig('rules', value)} placeholder={'[\n  { "path": "status", "operator": "equals", "value": "ready" }\n]'} />}
           {type === 'builtin.sort' && <>
-            <ConfigField label="Sort Path" value={node.data.config['path']} onChange={value => setConfig('path', value)} />
-            <label className="field"><span>Order</span><select value={String(node.data.config['order'] ?? 'asc')} onChange={event => setConfig('order', event.target.value)}><option value="asc">Ascending</option><option value="desc">Descending</option></select></label>
+            <ConfigField propertyKey="path" label="Sort Path" value={node.data.config['path']} onChange={value => setConfig('path', value)} />
+            <PropertyField propertyKey="order" label="Order"><select value={String(node.data.config['order'] ?? 'asc')} onChange={event => setConfig('order', event.target.value)}><option value="asc">Ascending</option><option value="desc">Descending</option></select></PropertyField>
           </>}
           {type === 'builtin.aggregate' && <>
-            <label className="field"><span>Operation</span><select value={String(node.data.config['operation'] ?? 'count')} onChange={event => setConfig('operation', event.target.value)}><option value="count">Count</option><option value="sum">Sum</option><option value="average">Average</option><option value="min">Minimum</option><option value="max">Maximum</option></select></label>
-            <ConfigField label="Value Path" value={node.data.config['path']} onChange={value => setConfig('path', value)} />
+            <PropertyField propertyKey="operation" label="Operation"><select value={String(node.data.config['operation'] ?? 'count')} onChange={event => setConfig('operation', event.target.value)}><option value="count">Count</option><option value="sum">Sum</option><option value="average">Average</option><option value="min">Minimum</option><option value="max">Maximum</option></select></PropertyField>
+            <ConfigField propertyKey="path" label="Value Path" value={node.data.config['path']} onChange={value => setConfig('path', value)} />
           </>}
-          {type === 'builtin.json-stringify' && <label className="field"><span>Formatting</span><select value={node.data.config['pretty'] === true ? 'pretty' : 'compact'} onChange={event => setConfig('pretty', event.target.value === 'pretty')}><option value="compact">Compact</option><option value="pretty">Pretty printed</option></select></label>}
-          {type === 'builtin.wait' && <ConfigField label="Duration (ms)" type="number" value={node.data.config['durationMs'] ?? 1000} onChange={value => setConfig('durationMs', value)} />}
-          {type === 'builtin.stop-error' && <ConfigField label="Error Message" value={node.data.config['message']} onChange={value => setConfig('message', value)} />}
+          {type === 'builtin.json-stringify' && <PropertyField propertyKey="pretty" label="Formatting"><select value={node.data.config['pretty'] === true ? 'pretty' : 'compact'} onChange={event => setConfig('pretty', event.target.value === 'pretty')}><option value="compact">Compact</option><option value="pretty">Pretty printed</option></select></PropertyField>}
+          {type === 'builtin.wait' && <ConfigField propertyKey="durationMs" label="Duration (ms)" type="number" value={node.data.config['durationMs'] ?? 1000} onChange={value => setConfig('durationMs', value)} />}
+          {type === 'builtin.stop-error' && <ConfigField propertyKey="message" label="Error Message" value={node.data.config['message']} onChange={value => setConfig('message', value)} />}
           {type === 'dsh.agent' && <>
-            <label className="field"><span>Subagent Provider</span><select value={configuredSubagentProvider} onChange={event => setOptionalConfig('subagentProvider', event.target.value || undefined)}>
+            <PropertyField propertyKey="subagentProvider" label="Subagent Provider"><select value={configuredSubagentProvider} onChange={event => setOptionalConfig('subagentProvider', event.target.value || undefined)}>
               <option value="">自动选择{subagentProviders[0] === undefined ? '' : ` · ${subagentProviders[0].id}`}</option>
               {configuredSubagentProvider !== '' && !subagentProviders.some(provider => provider.id === configuredSubagentProvider)
                 && <option value={configuredSubagentProvider}>{configuredSubagentProvider} · 当前不可用</option>}
               {subagentProviders.map(provider => <option key={provider.id} value={provider.id}>{provider.id}{provider.inheritsParentContext ? ' · 继承上下文' : ' · 独立上下文'}</option>)}
-            </select></label>
+            </select></PropertyField>
             {selectedSubagentProvider === undefined
               ? <div className="model-catalog-note is-error">Host 当前没有可用的 Subagent Provider；Agent 节点会拒绝执行。</div>
               : <div className="agent-capabilities" aria-label="Subagent Provider capabilities">
                   <span className={selectedSubagentProvider.inheritsParentContext ? 'is-on' : ''}>{selectedSubagentProvider.inheritsParentContext ? '继承上下文' : '独立上下文'}</span>
                   {Object.entries(selectedSubagentProvider.capabilities).map(([name, enabled]) => <span key={name} className={enabled ? 'is-on' : 'is-off'}>{name}</span>)}
                 </div>}
-            <ConfigField label="Child Label（可选）" value={node.data.config['label']} onChange={value => setOptionalConfig('label', value)} placeholder="默认使用节点显示名称" />
+            <ConfigField propertyKey="label" label="Child Label（可选）" value={node.data.config['label']} onChange={value => setOptionalConfig('label', value)} placeholder="默认使用节点显示名称" />
             <div className="agent-option-heading"><strong>AgentOptions</strong><span>留空时继承 Provider 或父 Agent</span></div>
-            <ConfigField label="Model Provider" value={agentOptionValue('provider')} onChange={value => setAgentOption('provider', value)} list="dsh-runflow-model-providers" placeholder="选择或输入 Provider ID" />
+            <ConfigField propertyKey="agentOptions.provider" label="Model Provider" value={agentOptionValue('provider')} onChange={value => setAgentOption('provider', value)} list="dsh-runflow-model-providers" placeholder="选择或输入 Provider ID" />
             <datalist id="dsh-runflow-model-providers">
               {modelCatalog.groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
             </datalist>
-            <ConfigField label="Model ID" value={agentOptionValue('model')} onChange={value => setAgentOption('model', value)} list="dsh-runflow-model-ids" placeholder="选择或输入 Model ID" />
+            <ConfigField propertyKey="agentOptions.model" label="Model ID" value={agentOptionValue('model')} onChange={value => setAgentOption('model', value)} list="dsh-runflow-model-ids" placeholder="选择或输入 Model ID" />
             <datalist id="dsh-runflow-model-ids">
               {providerModels.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
             </datalist>
             {selectedModel?.reasoning === undefined
-              ? <ConfigField label="Reasoning Effort（可选）" value={agentOptionValue('reasoningEffort')} onChange={value => setAgentOption('reasoningEffort', value)} placeholder="由所选模型决定；也可手工输入" />
-              : <label className="field"><span>Reasoning Effort</span><select value={String(agentOptionValue('reasoningEffort') ?? '')} onChange={event => setAgentOption('reasoningEffort', event.target.value || undefined)}>
+              ? <ConfigField propertyKey="agentOptions.reasoningEffort" label="Reasoning Effort（可选）" value={agentOptionValue('reasoningEffort')} onChange={value => setAgentOption('reasoningEffort', value)} placeholder="由所选模型决定；也可手工输入" />
+              : <PropertyField propertyKey="agentOptions.reasoningEffort" label="Reasoning Effort"><select value={String(agentOptionValue('reasoningEffort') ?? '')} onChange={event => setAgentOption('reasoningEffort', event.target.value || undefined)}>
                   <option value="">模型默认{selectedModel.reasoning.defaultEffort === undefined ? '' : ` · ${selectedModel.reasoning.defaultEffort}`}</option>
                   {selectedModel.reasoning.efforts.map(effort => <option key={effort.id} value={effort.id}>{effort.name}</option>)}
-                </select></label>}
+                </select></PropertyField>}
             <div className={`model-catalog-note ${modelCatalog.status === 'error' ? 'is-error' : ''}`}>
               {modelCatalog.status === 'loading' && '正在从当前 DSH 会话加载模型目录…'}
               {modelCatalog.status === 'ready' && `${modelCatalog.groups.length} 个 Provider · ${modelCatalog.groups.reduce((count, group) => count + group.models.length, 0)} 个模型`}
@@ -368,37 +435,37 @@ export function PropertyInspector({ hidden = false, onClose, showOutputTab = tru
               {modelCatalog.failures.length > 0 && ` · ${modelCatalog.failures.length} 个 Provider 加载失败`}
             </div>
             <div className="field-row">
-              <ConfigField label="Max Tokens (> 0)" type="number" value={agentOptionValue('maxTokens')} onChange={value => setAgentOption('maxTokens', value)} />
-              <ConfigField label="Max Depth (≥ 0)" type="number" value={node.data.config['maxDepth']} onChange={value => setOptionalConfig('maxDepth', value)} />
+              <ConfigField propertyKey="agentOptions.maxTokens" label="Max Tokens (> 0)" type="number" value={agentOptionValue('maxTokens')} onChange={value => setAgentOption('maxTokens', value)} />
+              <ConfigField propertyKey="maxDepth" label="Max Depth (≥ 0)" type="number" value={node.data.config['maxDepth']} onChange={value => setOptionalConfig('maxDepth', value)} />
             </div>
             {selectedSubagentProvider !== undefined && !selectedSubagentProvider.capabilities.agentOptions
               && hasConfiguredAgentOptions
               && <div className="model-catalog-note is-error">所选 Provider 不支持 AgentOptions；请清空模型、推理强度和 Max Tokens，或切换 Provider。</div>}
             <div className="agent-option-heading"><strong>Child capabilities</strong><span>按 Provider 能力在启动前严格校验</span></div>
-            <StringListField label="Tool allow（每行一个全局工具名）" value={nestedToolFilter['allow'] ?? node.data.config['toolAllow']} onChange={value => setToolFilter('allow', value)} placeholder="留空表示不设置 allow 限制" />
-            <StringListField label="Tool deny（每行一个全局工具名）" value={nestedToolFilter['deny'] ?? node.data.config['toolDeny']} onChange={value => setToolFilter('deny', value)} placeholder={'例如 shell\nrun_code'} />
-            <JsonConfigField
+            <StringListField propertyKey="toolFilter.allow" label="Tool allow（每行一个全局工具名）" value={nestedToolFilter['allow'] ?? node.data.config['toolAllow']} onChange={value => setToolFilter('allow', value)} placeholder="留空表示不设置 allow 限制" />
+            <StringListField propertyKey="toolFilter.deny" label="Tool deny（每行一个全局工具名）" value={nestedToolFilter['deny'] ?? node.data.config['toolDeny']} onChange={value => setToolFilter('deny', value)} placeholder={'例如 shell\nrun_code'} />
+            <JsonConfigField propertyKey="outputSchema"
               label="Output Schema · object-rooted JSON Schema"
               value={node.data.config['outputSchema']}
               onChange={value => setOptionalConfig('outputSchema', value)}
               placeholder={'{\n  "type": "object",\n  "properties": {}\n}'}
             />
-            <label className="field"><span>Persona（可选）</span><textarea className="compact-textarea" value={String(node.data.config['persona'] ?? '')} onChange={event => setOptionalConfig('persona', event.target.value || undefined)} /></label>
+            <PropertyField propertyKey="persona" label="Persona（可选）"><textarea className="compact-textarea" value={String(node.data.config['persona'] ?? '')} onChange={event => setOptionalConfig('persona', event.target.value || undefined)} /></PropertyField>
             {selectedSubagentProvider !== undefined && (
               (!selectedSubagentProvider.capabilities.outputSchema && node.data.config['outputSchema'] !== undefined)
               || (!selectedSubagentProvider.capabilities.depthLimit && node.data.config['maxDepth'] !== undefined)
               || (!selectedSubagentProvider.capabilities.toolFilter && Object.keys(nestedToolFilter).length > 0)
               || (!selectedSubagentProvider.capabilities.persona && String(node.data.config['persona'] ?? '').trim() !== '')
             ) && <div className="model-catalog-note is-error">当前配置使用了 Provider 未声明支持的启动能力；Host 会明确拒绝执行，不会静默忽略。</div>}
-            <label className="field"><span>Prompt · 支持 {'{{input}}'}</span><textarea value={String(node.data.config['prompt'] ?? '')} onChange={event => setOptionalConfig('prompt', event.target.value || undefined)} /></label>
+            <PropertyField propertyKey="prompt" label="Prompt · {{input}}"><textarea value={String(node.data.config['prompt'] ?? '')} onChange={event => setOptionalConfig('prompt', event.target.value || undefined)} /></PropertyField>
           </>}
           {type === 'script.javascript' && <>
-            <ConfigField label="执行说明" value={node.data.config['description']} onChange={value => setConfig('description', value)} />
-            <LightCodeEditor label="JavaScript · input / inputs / config / runflow" profile="run-code" minRows={10} value={String(node.data.config['code'] ?? '')} onChange={value => setConfig('code', value)} />
+            <ConfigField propertyKey="description" label="执行说明" value={node.data.config['description']} onChange={value => setConfig('description', value)} />
+            <PropertyField propertyKey="code" label="JavaScript"><LightCodeEditor label="JavaScript · input / inputs / config / runflow" profile="run-code" minRows={10} value={String(node.data.config['code'] ?? '')} onChange={value => setConfig('code', value)} /></PropertyField>
             {!capabilities.runCode && <div className="model-catalog-note is-error">当前会话未暴露 run_code。切换到 DSH 创造模式后再执行此节点。</div>}
           </>}
-          {type === 'storage.write' && <ConfigField label="Collection" value={node.data.config['collection']} onChange={value => setConfig('collection', value)} />}
-          {!isStateGraphNode(type) && !['trigger.agent', 'trigger.manual', 'trigger.webhook', 'trigger.schedule', 'trigger.dsh-event', 'http.request', 'builtin.condition', 'builtin.filter', 'builtin.merge', 'builtin.limit', 'builtin.date-time', 'builtin.switch', 'builtin.sort', 'builtin.aggregate', 'builtin.json-parse', 'builtin.json-stringify', 'builtin.wait', 'builtin.stop-error', 'builtin.noop', 'dsh.agent', 'script.javascript', 'storage.write'].includes(type) && <ConfigField label="Value" value={node.data.config['value']} onChange={value => setConfig('value', value)} />}
+          {type === 'storage.write' && <ConfigField propertyKey="collection" label="Collection" value={node.data.config['collection']} onChange={value => setConfig('collection', value)} />}
+          {!isStateGraphNode(type) && <AdditionalPropertyFields exclude={specializedProperties[type] ?? []} />}
         </section>
         {showOutputTab && inspectorTab === 'output' && node.data.executionRecord !== undefined && <section className="form-section inspector-output-panel">
           <div className="form-section-title">{t('output')}</div>
@@ -417,6 +484,6 @@ export function PropertyInspector({ hidden = false, onClose, showOutputTab = tru
           {running ? t('runningHost') : t('runNode')}
         </button>
       </div>
-    </aside>
+    </aside></PropertyContext.Provider>
   )
 }

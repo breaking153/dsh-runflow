@@ -7,6 +7,7 @@ import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import type { JsonValue, NodeExecutionContext } from '../src/contracts.ts'
 import type { FlowService } from '../src/flow-service.ts'
 import { DirectoryPluginLoader } from '../src/directory-plugin-loader.ts'
+import { withCoreNodeExecution } from '../src/core-node-execution.ts'
 import { FlowScriptChannel, type FlowScriptChannelTicket } from './channel.ts'
 import type {
   FlowScriptError,
@@ -115,7 +116,7 @@ export class FlowScriptService extends Service {
       await this.loader.start()
       return () => this.loader.dispose()
     }, 'dsh-runflow: Script executor directory')
-    ctx.flow.registerNode({
+    ctx.flow.registerNode(withCoreNodeExecution({
       type: 'script.javascript',
       title: 'JavaScript',
       description: 'Execute JavaScript through the Harness run_code transport.',
@@ -141,7 +142,7 @@ export class FlowScriptService extends Service {
         },
       },
       execute: context => this.executeNode(context),
-    })
+    }))
   }
 
   submit(request: FlowScriptRequest): FlowScriptChannelTicket {
