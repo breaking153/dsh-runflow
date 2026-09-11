@@ -47,7 +47,8 @@ export function useFlowModelCatalog(): FlowModelCatalogState {
 }
 
 export function modelsForProvider(state: FlowModelCatalogState, providerId: string) {
-  return state.groups.find(group => group.id === providerId)?.models ?? []
+  // Empty node options inherit the current session route, but stay unset in the workflow.
+  return state.groups.find(group => group.id === (providerId || state.current?.provider))?.models ?? []
 }
 
 /** Bridge the current DSH session's official shared model directory into the Flow inspector. */

@@ -1,0 +1,12 @@
+{
+  "status": "SUCCESS",
+  "executionId": "3d507f68-3921-4fdd-8817-422dab544fe6",
+  "provider": "openai-codex",
+  "model": "gpt-5.6-luna",
+  "reasoningEffort": "low",
+  "text": "RUNFLOW_CODEX_OK",
+  "nextStatus": "SUCCESS",
+  "toolFilter": {
+    "allow": []
+  }
+}

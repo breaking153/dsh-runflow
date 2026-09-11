@@ -7,7 +7,7 @@ import { ConnectionLineType, Position, type ConnectionLineComponentProps } from 
 import { CanvasConnectionLine } from '../src/client/CanvasConnectionLine.tsx'
 import { makeNode, useFlowStore, type FlowNode } from '../src/client/store.ts'
 
-it('changes occupied flow preview from invalid to valid only after opting the DAG into Blueprint', async () => {
+it('renders a valid flow reuse preview in both legacy DAG and Blueprint', async () => {
   ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   const source = makeNode('a', 'trigger.manual', { x: 0, y: 0 })
   const target = makeNode('b', 'builtin.wait', { x: 240, y: 80 })
@@ -17,8 +17,8 @@ it('changes occupied flow preview from invalid to valid only after opting the DA
   const feedback = vi.fn(); const host = document.createElement('div'); const root = createRoot(host)
   try {
     await act(async () => root.render(<svg><CanvasConnectionLine {...props} onFeedback={feedback} /></svg>))
-    expect(host.querySelector('.is-invalid')).not.toBeNull()
-    expect(feedback).toHaveBeenLastCalledWith(expect.objectContaining({ ok: false, reason: 'input-occupied' }))
+    expect(host.querySelector('.is-valid')).not.toBeNull()
+    expect(feedback).toHaveBeenLastCalledWith(expect.objectContaining({ ok: true }))
     await act(async () => useFlowStore.setState({ workflowExecution: { mode: 'dag', semantics: 'blueprint' } }))
     expect(host.querySelector('.is-valid')).not.toBeNull()
     expect(feedback).toHaveBeenLastCalledWith(expect.objectContaining({ ok: true }))

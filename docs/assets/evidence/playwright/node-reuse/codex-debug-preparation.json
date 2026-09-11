@@ -1,0 +1,11 @@
+{
+  "preparedAt": "2026-09-11T08:28:46.560Z",
+  "pluginId": "runflow-debug-codex-compat-20260911",
+  "sourceVersion": "0.1.0-alpha.4.24",
+  "authenticated": true,
+  "hostRegistryVersion": "0.1.5-rc.1",
+  "catalogModels": 7,
+  "modelCalls": 0,
+  "originalFilesChanged": false,
+  "bundleSha256": "a21ea4e27cc4a361bb9375a31930eff0feb8c389f63a10a88eca777dd3aed02b"
+}

@@ -1,0 +1,137 @@
+{
+  "verifiedAt": "2026-09-11T08:59:27.580Z",
+  "mode": "dsh web",
+  "hostVersion": "0.1.5-rc.1",
+  "branch": "master",
+  "baseline": "a5c69c4",
+  "committed": false,
+  "checks": {
+    "typecheck": true,
+    "testFiles": 70,
+    "tests": 546,
+    "build": true,
+    "strictOpenSpec": true,
+    "browserErrors": 0,
+    "browserWarnings": 0
+  },
+  "pinInteraction": {
+    "delete": true,
+    "contextDisconnect": true,
+    "menuEscapePreservesWires": true,
+    "dragEscapeDisconnects": true,
+    "undoRestoresBoth": true,
+    "nodes": 5
+  },
+  "nodeOptions": {
+    "methods": [
+      "GET",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "HEAD",
+      "OPTIONS",
+      "自定义"
+    ],
+    "operators": [
+      "equals",
+      "notEquals",
+      "contains",
+      "greaterThan",
+      "lessThan"
+    ],
+    "selectedMethod": "PATCH",
+    "selectedOperator": "lessThan"
+  },
+  "modelOptions": {
+    "providers": [
+      "继承父 Agent · deepseek-official",
+      "DeepSeek · deepseek-official",
+      "OpenAI Codex · openai-codex",
+      "自定义"
+    ],
+    "models": [
+      "继承父 Agent · deepseek-flash",
+      "GPT-5.3 Codex Spark · gpt-5.3-codex-spark",
+      "GPT-5.4 · gpt-5.4",
+      "GPT-5.4 mini · gpt-5.4-mini",
+      "GPT-5.5 · gpt-5.5",
+      "GPT-5.6 Luna · gpt-5.6-luna",
+      "GPT-5.6 Sol · gpt-5.6-sol",
+      "GPT-5.6 Terra · gpt-5.6-terra",
+      "自定义"
+    ],
+    "efforts": [
+      "继承父 Agent / 模型默认",
+      "Off",
+      "Minimal",
+      "Low",
+      "Medium",
+      "High",
+      "Xhigh",
+      "Max",
+      "自定义"
+    ],
+    "providerReset": true,
+    "selected": {
+      "provider": "OpenAI Codex · openai-codex",
+      "model": "GPT-5.6 Luna · gpt-5.6-luna",
+      "effort": "Low"
+    }
+  },
+  "runs": [
+    {
+      "workflowId": "node-reuse-blueprint",
+      "executionId": "3de2a80b-c40e-4630-9fed-f0aab20b1540",
+      "status": "SUCCESS",
+      "calls": {
+        "shared": 2,
+        "next": 2,
+        "end": 2
+      }
+    },
+    {
+      "workflowId": "node-reuse-legacy",
+      "executionId": "35fc3db6-f305-496c-8728-daab7693656d",
+      "status": "SUCCESS",
+      "calls": {
+        "shared": 1,
+        "next": 1,
+        "end": 1
+      }
+    }
+  ],
+  "codex": {
+    "status": "SUCCESS",
+    "executionId": "3d507f68-3921-4fdd-8817-422dab544fe6",
+    "provider": "openai-codex",
+    "model": "gpt-5.6-luna",
+    "reasoningEffort": "low",
+    "text": "RUNFLOW_CODEX_OK",
+    "nextStatus": "SUCCESS",
+    "toolFilter": {
+      "allow": []
+    }
+  },
+  "cleanup": {
+    "debugPluginRemoved": true,
+    "debugPatchRemoved": true,
+    "originalDependenciesPreserved": true,
+    "completedAt": "2026-09-11T08:57:58.0849755Z",
+    "workflowCount": 0,
+    "privateBrowserAuthRemoved": true,
+    "verificationPortsClosed": true
+  },
+  "screenshots": {
+    "node-reuse-blueprint.png": "12a4acba27895489f37ec40047d1f9421839dd56e77a3e3c3efae82fa934d425",
+    "node-reuse-codex-options.png": "337a64201a62e5087d219b73b0497786c3fa77dde98bf41ddf0b4b52a5080f4c",
+    "node-reuse-codex-result.png": "17bfea36b610918c608b5f7ded7a2d1aa83f15c5416335ed3a6fecc6ef7c53b1",
+    "node-reuse-codex-success.png": "f23ae99b6f51acc01d0214448bbddc85f52c024c51fd022e4abf221132ffcfad",
+    "node-reuse-disconnected.png": "5282cc0afd12043d1605407b900fa59c22f050b539d4f9a1035c235ee323fd93",
+    "node-reuse-drag-chooser.png": "51c5026024939c49b5293c9a7aab475a7f1fe1ca355145e9c7b061e9afe8cdb9",
+    "node-reuse-filter-options.png": "bea9f35bcd94e41094a9ff9d5713e690953f763d10f5bde5fed7b280ea73b989",
+    "node-reuse-http-options.png": "badc7e1a31cf5c3ec8937451276095fa66d4525fb0f22c50914d69cdc2f92d1d",
+    "node-reuse-legacy.png": "62c37af92ac5db396a1a519a296d1b672ab6b00f9e3909417dbfe108a742485e",
+    "node-reuse-pin-menu.png": "46024c48c37f9f9eceb334b492c220286f0f45e6c7e6b2215c5fd7ce7d70c855"
+  }
+}

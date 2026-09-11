@@ -1,0 +1,22 @@
+[
+  {
+    "workflowId": "node-reuse-blueprint",
+    "executionId": "3de2a80b-c40e-4630-9fed-f0aab20b1540",
+    "status": "SUCCESS",
+    "calls": {
+      "shared": 2,
+      "next": 2,
+      "end": 2
+    }
+  },
+  {
+    "workflowId": "node-reuse-legacy",
+    "executionId": "35fc3db6-f305-496c-8728-daab7693656d",
+    "status": "SUCCESS",
+    "calls": {
+      "shared": 1,
+      "next": 1,
+      "end": 1
+    }
+  }
+]

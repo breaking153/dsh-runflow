@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEven
 import { ArrowRight, Box, Copy, Group, LibraryBig, LoaderCircle, Play, Route, Search, Settings2, Trash2, X } from 'lucide-react'
 import type { JsonValue, NodeCategory, WorkflowNodeDescriptor } from '../contracts.ts'
 import { CATEGORY_LABELS, NodeIcon, descriptorFor } from './catalog.tsx'
-import { AdditionalPropertyFields, PropertyContext, PropertyField } from './PropertyField.tsx'
+import { AdditionalPropertyFields, PropertyContext, PropertyField, PropertyOptionsField } from './PropertyField.tsx'
+import { configurableProperties } from '../node-properties.ts'
 import { modelsForProvider, useFlowModelCatalog } from './model-catalog.ts'
 import { useFlowRuntime } from './runtime.ts'
 import { useFlowStore } from './store.ts'
@@ -312,6 +313,10 @@ export function PropertyInspector({ hidden = false, onClose, showOutputTab = tru
       delete options['reasoningEffort']
       delete config['reasoningEffort']
     }
+    if (key === 'provider') {
+      delete options['model']
+      delete config['model']
+    }
     if (Object.keys(options).length === 0) delete config['agentOptions']
     else config['agentOptions'] = options
     updateNode(node.id, { config })
@@ -334,10 +339,15 @@ export function PropertyInspector({ hidden = false, onClose, showOutputTab = tru
   const modelProvider = String(agentOptionValue('provider') ?? '')
   const providerModels = modelsForProvider(modelCatalog, modelProvider)
   const modelId = String(agentOptionValue('model') ?? '')
-  const selectedModel = providerModels.find(model => model.id === modelId)
+  const selectedModel = providerModels.find(model => model.id === (modelId || modelCatalog.current?.model))
   const hasConfiguredAgentOptions = ['provider', 'model', 'reasoningEffort', 'maxTokens']
     .some(key => agentOptionValue(key) !== undefined && agentOptionValue(key) !== '')
   const descriptor = nodeCatalog.find(item => item.type === type) ?? descriptorFor(type)
+  const declaredOptions = (key: string, fallback: string[] = []): { value: string; label: string }[] => {
+    const schema = configurableProperties(descriptor).find(property => property.key === key)?.schema
+    const values = Array.isArray(schema?.enum) ? schema.enum.filter((value): value is string => typeof value === 'string') : fallback
+    return values.map(value => ({ value, label: value }))
+  }
   const configuredSubagentProvider = String(node.data.config['subagentProvider'] ?? '')
   const effectiveSubagentProvider = configuredSubagentProvider || subagentProviders[0]?.id || ''
   const selectedSubagentProvider = subagentProviders.find(provider => provider.id === effectiveSubagentProvider)
@@ -377,22 +387,22 @@ export function PropertyInspector({ hidden = false, onClose, showOutputTab = tru
           {type === 'trigger.webhook' && <WebhookSettings triggerNodeId={node.id} />}
           {type === 'trigger.schedule' && <ConfigField propertyKey="cron" label="Cron Expression" value={node.data.config['cron'] ?? '0 8 * * *'} onChange={value => setConfig('cron', value)} />}
           {type === 'http.request' && <>
-            <PropertyField propertyKey="method" label="Method"><select value={String(node.data.config['method'] ?? 'GET')} onChange={event => setConfig('method', event.target.value)}><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select></PropertyField>
+            <PropertyOptionsField key={node.id + '-method'} propertyKey="method" label="Method" value={String(node.data.config['method'] ?? 'GET')} options={declaredOptions('method', ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'])} allowCustom onChange={value => setConfig('method', value)} />
             <ConfigField propertyKey="url" label="URL" value={node.data.config['url']} onChange={value => setConfig('url', value)} />
           </>}
           {(type === 'builtin.condition' || type === 'builtin.filter') && <>
             <ConfigField propertyKey="path" label="Input Path" value={node.data.config['path']} onChange={value => setConfig('path', value)} />
-            <PropertyField propertyKey="operator" label="Operator"><select value={String(node.data.config['operator'] ?? 'equals')} onChange={event => setConfig('operator', event.target.value)}><option value="equals">Equals</option><option value="notEquals">Not equals</option><option value="contains">Contains</option><option value="greaterThan">Greater than</option></select></PropertyField>
+            <PropertyOptionsField propertyKey="operator" label="Operator" value={String(node.data.config['operator'] ?? 'equals')} options={declaredOptions('operator')} onChange={value => setConfig('operator', value)} />
             <ConfigField propertyKey="value" label="Compare Value" value={node.data.config['value']} onChange={value => setConfig('value', value)} />
           </>}
           {type === 'builtin.limit' && <ConfigField propertyKey="maxItems" label="Max Items" type="number" value={node.data.config['maxItems'] ?? 10} onChange={value => setConfig('maxItems', value)} />}
           {type === 'builtin.switch' && <JsonConfigField propertyKey="rules" label="Rules JSON" objectRoot={false} value={node.data.config['rules']} onChange={value => setOptionalConfig('rules', value)} placeholder={'[\n  { "path": "status", "operator": "equals", "value": "ready" }\n]'} />}
           {type === 'builtin.sort' && <>
             <ConfigField propertyKey="path" label="Sort Path" value={node.data.config['path']} onChange={value => setConfig('path', value)} />
-            <PropertyField propertyKey="order" label="Order"><select value={String(node.data.config['order'] ?? 'asc')} onChange={event => setConfig('order', event.target.value)}><option value="asc">Ascending</option><option value="desc">Descending</option></select></PropertyField>
+            <PropertyOptionsField propertyKey="order" label="Order" value={String(node.data.config['order'] ?? 'asc')} options={declaredOptions('order')} onChange={value => setConfig('order', value)} />
           </>}
           {type === 'builtin.aggregate' && <>
-            <PropertyField propertyKey="operation" label="Operation"><select value={String(node.data.config['operation'] ?? 'count')} onChange={event => setConfig('operation', event.target.value)}><option value="count">Count</option><option value="sum">Sum</option><option value="average">Average</option><option value="min">Minimum</option><option value="max">Maximum</option></select></PropertyField>
+            <PropertyOptionsField propertyKey="operation" label="Operation" value={String(node.data.config['operation'] ?? 'count')} options={declaredOptions('operation')} onChange={value => setConfig('operation', value)} />
             <ConfigField propertyKey="path" label="Value Path" value={node.data.config['path']} onChange={value => setConfig('path', value)} />
           </>}
           {type === 'builtin.json-stringify' && <PropertyField propertyKey="pretty" label="Formatting"><select value={node.data.config['pretty'] === true ? 'pretty' : 'compact'} onChange={event => setConfig('pretty', event.target.value === 'pretty')}><option value="compact">Compact</option><option value="pretty">Pretty printed</option></select></PropertyField>}
@@ -413,26 +423,23 @@ export function PropertyInspector({ hidden = false, onClose, showOutputTab = tru
                 </div>}
             <ConfigField propertyKey="label" label="Child Label（可选）" value={node.data.config['label']} onChange={value => setOptionalConfig('label', value)} placeholder="默认使用节点显示名称" />
             <div className="agent-option-heading"><strong>AgentOptions</strong><span>留空时继承 Provider 或父 Agent</span></div>
-            <ConfigField propertyKey="agentOptions.provider" label="Model Provider" value={agentOptionValue('provider')} onChange={value => setAgentOption('provider', value)} list="dsh-runflow-model-providers" placeholder="选择或输入 Provider ID" />
-            <datalist id="dsh-runflow-model-providers">
-              {modelCatalog.groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
-            </datalist>
-            <ConfigField propertyKey="agentOptions.model" label="Model ID" value={agentOptionValue('model')} onChange={value => setAgentOption('model', value)} list="dsh-runflow-model-ids" placeholder="选择或输入 Model ID" />
-            <datalist id="dsh-runflow-model-ids">
-              {providerModels.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
-            </datalist>
-            {selectedModel?.reasoning === undefined
-              ? <ConfigField propertyKey="agentOptions.reasoningEffort" label="Reasoning Effort（可选）" value={agentOptionValue('reasoningEffort')} onChange={value => setAgentOption('reasoningEffort', value)} placeholder="由所选模型决定；也可手工输入" />
-              : <PropertyField propertyKey="agentOptions.reasoningEffort" label="Reasoning Effort"><select value={String(agentOptionValue('reasoningEffort') ?? '')} onChange={event => setAgentOption('reasoningEffort', event.target.value || undefined)}>
-                  <option value="">模型默认{selectedModel.reasoning.defaultEffort === undefined ? '' : ` · ${selectedModel.reasoning.defaultEffort}`}</option>
-                  {selectedModel.reasoning.efforts.map(effort => <option key={effort.id} value={effort.id}>{effort.name}</option>)}
-                </select></PropertyField>}
+            <PropertyOptionsField key={node.id + '-provider'} propertyKey="agentOptions.provider" label="Model Provider" value={modelProvider}
+              options={modelCatalog.groups.map(group => ({ value: group.id, label: group.name === group.id ? group.id : `${group.name} · ${group.id}` }))}
+              emptyLabel={`继承父 Agent${modelCatalog.current === null ? '' : ` · ${modelCatalog.current.provider}`}`} allowCustom onChange={value => setAgentOption('provider', value)} />
+            <PropertyOptionsField key={node.id + '-model-' + modelProvider} propertyKey="agentOptions.model" label="Model ID" value={modelId}
+              options={providerModels.map(model => ({ value: model.id, label: model.name === model.id ? model.id : `${model.name} · ${model.id}` }))}
+              emptyLabel={`继承父 Agent${modelCatalog.current === null ? '' : ` · ${modelCatalog.current.model}`}`} allowCustom onChange={value => setAgentOption('model', value)} />
+            <PropertyOptionsField key={node.id + '-effort-' + modelProvider + '-' + modelId} propertyKey="agentOptions.reasoningEffort" label="Reasoning Effort" value={String(agentOptionValue('reasoningEffort') ?? '')}
+              options={selectedModel?.reasoning?.efforts.map(effort => ({ value: effort.id, label: effort.name })) ?? []}
+              emptyLabel="继承父 Agent / 模型默认" allowCustom onChange={value => setAgentOption('reasoningEffort', value)} />
             <div className={`model-catalog-note ${modelCatalog.status === 'error' ? 'is-error' : ''}`}>
               {modelCatalog.status === 'loading' && '正在从当前 DSH 会话加载模型目录…'}
-              {modelCatalog.status === 'ready' && `${modelCatalog.groups.length} 个 Provider · ${modelCatalog.groups.reduce((count, group) => count + group.models.length, 0)} 个模型`}
-              {modelCatalog.status === 'error' && `目录加载失败：${modelCatalog.error ?? '未知错误'}（仍可手工输入）`}
-              {modelCatalog.status === 'idle' && '打开一个主会话后可加载模型目录；当前仍可手工输入。'}
+              {modelCatalog.status === 'selecting' && '当前 DSH 会话正在切换模型…'}
+              {modelCatalog.status === 'ready' && (modelCatalog.groups.length > 0 ? `${modelCatalog.groups.length} 个 Provider · ${modelCatalog.groups.reduce((count, group) => count + group.models.length, 0)} 个模型` : 'Host 当前没有公布可选模型；可保留继承设置或选择自定义。')}
+              {modelCatalog.status === 'error' && `目录加载失败：${modelCatalog.error ?? '未知错误'}（已加载的选项和自定义值仍可使用）`}
+              {modelCatalog.status === 'idle' && '打开一个主会话后会自动加载模型目录；也可选择自定义。'}
               {modelCatalog.failures.length > 0 && ` · ${modelCatalog.failures.length} 个 Provider 加载失败`}
+              {selectedModel !== undefined && selectedModel.reasoning === undefined && ' · 所选模型未公布推理强度选项'}
             </div>
             <div className="field-row">
               <ConfigField propertyKey="agentOptions.maxTokens" label="Max Tokens (> 0)" type="number" value={agentOptionValue('maxTokens')} onChange={value => setAgentOption('maxTokens', value)} />

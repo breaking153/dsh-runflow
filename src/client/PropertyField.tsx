@@ -65,6 +65,40 @@ export function PropertyField({ propertyKey, label, children, className = '' }: 
   </div>
 }
 
+/** Visible choices with an explicit escape hatch for advisory Host catalogs. */
+export function PropertyOptionsField({ propertyKey, label, value, options, onChange, emptyLabel, allowCustom = false }: {
+  propertyKey: string
+  label: string
+  value: string
+  options: readonly { value: string; label: string }[]
+  onChange(value: string): void
+  emptyLabel?: string
+  allowCustom?: boolean
+}) {
+  const { language } = useRunFlowLocale()
+  const [editingCustom, setEditingCustom] = useState(false)
+  const optionIndex = options.findIndex(option => option.value === value)
+  const unknown = optionIndex === -1 && !(value === '' && emptyLabel !== undefined)
+  const custom = allowCustom && (editingCustom || unknown)
+  const customLabel = language === 'zh' ? '自定义' : 'Custom'
+  const emptyValueLabel = language === 'zh' ? '空值' : 'Empty value'
+  const savedValueLabel = value === '' ? emptyValueLabel : value
+  const unavailableLabel = language === 'zh' ? '当前目录未列出' : 'Not in the current catalog'
+  return <PropertyField propertyKey={propertyKey} label={label}>
+    <select value={custom ? 'custom' : unknown ? 'unknown' : optionIndex === -1 ? '' : String(optionIndex)} onChange={event => {
+      if (event.target.value === 'custom') { setEditingCustom(true); return }
+      setEditingCustom(false)
+      onChange(event.target.value === '' ? '' : options[Number(event.target.value)]!.value)
+    }}>
+      {emptyLabel !== undefined && <option value="">{emptyLabel}</option>}
+      {unknown && !allowCustom && <option value="unknown" disabled>{savedValueLabel} · {unavailableLabel}</option>}
+      {options.map((option, index) => <option key={option.value} value={index}>{option.label || emptyValueLabel}</option>)}
+      {allowCustom && <option value="custom">{customLabel}{unknown ? ` · ${savedValueLabel}` : ''}</option>}
+    </select>
+    {custom && <div className="property-custom-option"><input aria-label={`${label} · ${customLabel}`} value={value} onChange={event => onChange(event.target.value)} spellCheck={false} /><small>{language === 'zh' ? '手工值会原样保存；可用性由 Host 在执行时校验。' : 'Custom values are preserved; the Host validates them when running.'}</small></div>}
+  </PropertyField>
+}
+
 function writeProperty(config: JsonObject, key: string, value: JsonValue | undefined): JsonObject {
   const next = structuredClone(config)
   const parts = key.split('.')
@@ -101,15 +135,18 @@ export function AdditionalPropertyFields({ exclude }: { exclude: readonly string
   const context = useContext(PropertyContext)
   const node = useFlowStore(state => state.nodes.find(node => node.id === context?.nodeId))
   const updateNode = useFlowStore(state => state.updateNode)
-  const { t } = useRunFlowLocale()
+  const { t, language } = useRunFlowLocale()
+  const emptyValueLabel = language === 'zh' ? '空值' : 'Empty value'
   if (context === undefined || node === undefined) return null
   return <>{configurableProperties(context.descriptor).filter(property => !exclude.includes(property.key)).map(property => {
     const configured = readConfigProperty(node.data.config, property.key)
     const value = configured === undefined ? property.schema.default : configured
     const change = (value: JsonValue | undefined): void => updateNode(node.id, { config: writeProperty(node.data.config, property.key, value) })
     const options = Array.isArray(property.schema.enum) ? property.schema.enum : undefined
+    const optionIndex = options?.findIndex(option => JSON.stringify(option) === JSON.stringify(value))
+    const unknownOption = options !== undefined && value !== undefined && optionIndex === -1
     return <PropertyField key={property.key} propertyKey={property.key} label={property.label}>
-      {options !== undefined ? <select aria-label={property.label} value={value === undefined ? '' : String(options.findIndex(option => JSON.stringify(option) === JSON.stringify(value)))} onChange={event => change(event.target.value === '' ? undefined : options[Number(event.target.value)])}><option value="">—</option>{options.map((option, index) => <option key={index} value={index}>{String(option)}</option>)}</select>
+      {options !== undefined ? <select aria-label={property.label} value={value === undefined ? '' : String(optionIndex)} onChange={event => change(event.target.value === '' ? undefined : options[Number(event.target.value)])}><option value="">—</option>{unknownOption && <option value="-1" disabled>{value === '' ? emptyValueLabel : typeof value === 'object' ? JSON.stringify(value) : String(value)} · {language === 'zh' ? '当前目录未列出' : 'Not in the current catalog'}</option>}{options.map((option, index) => <option key={index} value={index}>{option === '' ? emptyValueLabel : typeof option === 'object' ? JSON.stringify(option) : String(option)}</option>)}</select>
         : property.type === 'boolean' ? <input aria-label={property.label} type="checkbox" checked={value === true} onChange={event => change(event.target.checked)} />
         : property.type === 'text' || property.type === 'number' ? <input aria-label={property.label} type={property.type === 'number' ? 'number' : 'text'} step={property.schema.type === 'integer' ? 1 : 'any'} value={typeof value === 'string' || typeof value === 'number' ? value : ''} onChange={event => change(property.type === 'number' ? event.target.value === '' ? undefined : Number(event.target.value) : event.target.value)} />
         : <SchemaJsonInput property={property} value={value} onChange={change} />}

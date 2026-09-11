@@ -32,10 +32,10 @@ describe('immediate connection diagnostics', () => {
     const multiple = nodes.map(node => node.id === 'b' ? { ...node, data: { ...node.data, inputs: [{ id: 'in', type: 'number' as const, multiple: true }] } } : node)
     expect(validateNodeConnection(multiple, candidate, { mode: 'state-graph', semantics: 'blueprint', edges: [edge] })).toMatchObject({ ok: true })
   })
-  it('accepts distinct Blueprint flow sources without data aggregation metadata and still rejects duplicate wires', () => {
+  it('accepts distinct flow sources in every mode without data aggregation metadata and still rejects duplicate wires', () => {
     const flowNodes = ['a', 'b', 'c'].map(id => ({ id, data: { inputs: [{ id: 'in', type: 'flow' as const }], outputs: [{ id: 'out', type: 'flow' as const }] } }))
     expect(validateNodeConnection(flowNodes, { ...edge, source: 'c' }, { mode: 'dag', semantics: 'blueprint', edges: [edge] })).toMatchObject({ ok: true })
-    expect(validateNodeConnection(flowNodes, { ...edge, source: 'c' }, { mode: 'dag', edges: [edge] })).toMatchObject({ ok: false, reason: 'input-occupied' })
+    expect(validateNodeConnection(flowNodes, { ...edge, source: 'c' }, { mode: 'dag', edges: [edge] })).toMatchObject({ ok: true })
     expect(validateNodeConnection(flowNodes, { ...edge, source: 'c' }, { mode: 'state-graph', edges: [edge] })).toMatchObject({ ok: true })
     expect(validateNodeConnection(flowNodes, { ...edge, source: 'c' }, { mode: 'state-graph', semantics: 'blueprint', edges: [edge] })).toMatchObject({ ok: true })
     const multiple = flowNodes.map(node => node.id === 'b' ? { ...node, data: { ...node.data, inputs: [{ id: 'in', type: 'flow' as const, multiple: true }] } } : node)

@@ -3,6 +3,11 @@ import { useEffect, useRef } from 'react'
 const dialogStack: HTMLElement[] = []
 const focusableSelector = 'button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]'
 
+/** Outer surfaces must let the active modal handle Escape at the document boundary. */
+export function hasActiveDialogWithin(surface: HTMLElement): boolean {
+  return dialogStack.some(dialog => surface.contains(dialog))
+}
+
 function focusableElements(dialog: HTMLElement): HTMLElement[] {
   return [...dialog.querySelectorAll<HTMLElement>(focusableSelector)].filter(element => {
     if (element.tabIndex < 0 || element.matches(':disabled, input[type="hidden"]')

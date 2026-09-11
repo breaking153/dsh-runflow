@@ -4,7 +4,7 @@ import { validateWorkflow } from '../src/engine.ts'
 import { configurableProperties, resolveNodeConfig } from '../src/node-properties.ts'
 
 describe('independent Blueprint security review', () => {
-  it('retains legacy DAG scalar flow cardinality validation', () => {
+  it('accepts legacy DAG flow reuse while retaining scalar data cardinality validation', () => {
     const provider: WorkflowNodeDefinition = {
       type: 'custom.effect', title: 'Effect', description: 'Effect', category: 'action', icon: 'test', color: '#123456',
       inputs: [{ id: 'input', type: 'flow' }], outputs: [{ id: 'output', type: 'flow' }],
@@ -15,7 +15,9 @@ describe('independent Blueprint security review', () => {
       nodes: ['left', 'right', 'sink'].map(id => ({ id, type: provider.type, config: {} })),
       edges: [{ from: 'left', to: 'sink' }, { from: 'right', to: 'sink' }],
     }
-    expect(validateWorkflow(definition, () => provider)).toContainEqual(expect.objectContaining({ code: 'PORT_CARDINALITY' }))
+    expect(validateWorkflow(definition, () => provider)).toEqual([])
+    const dataProvider: WorkflowNodeDefinition = { ...provider, inputs: [{ id: 'input', type: 'json' }], outputs: [{ id: 'output', type: 'json' }] }
+    expect(validateWorkflow(definition, () => dataProvider)).toContainEqual(expect.objectContaining({ code: 'PORT_CARDINALITY' }))
   })
 
   it('does not let parent promotion replace a nested read-only setting', () => {

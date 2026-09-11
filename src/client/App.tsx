@@ -30,7 +30,7 @@ import { WorkflowNode } from './WorkflowNode.tsx'
 import { SourceWorkbench } from './SourceWorkbench.tsx'
 import { RerouteNode, SubflowNode, WorkflowGroupNode } from './GraphNodes.tsx'
 import { CanvasContextMenu, CommandPalette, SelectionToolbar, type CanvasMenuState } from './EditorOverlays.tsx'
-import { commandForKeyboardEvent, type EditorCommandId } from './editor-commands.ts'
+import { commandForKeyboardEvent, isEditableEventTarget, type EditorCommandId } from './editor-commands.ts'
 import { favoriteNodeTypes, rankNodeDescriptors, recentNodeTypes, rememberNodeType, toggleFavoriteNodeType, type NodeSearchScope } from './node-search.ts'
 import { TemplateBrowser } from './TemplateBrowser.tsx'
 import { KeybindingSettings } from './KeybindingSettings.tsx'
@@ -39,6 +39,8 @@ import { nodeGroupLabel } from './node-groups.ts'
 import { useResizablePanel } from './use-resizable-panel.ts'
 import { relativeTime, useRunFlowLocale } from './locale.ts'
 import { WorkflowExecutionSettings } from './WorkflowExecutionSettings.tsx'
+import { useDialogFocus } from './use-dialog-focus.ts'
+import { capturePinConnections, capturedPinEdgeIds, pinAtElement, type PinConnectionSnapshot } from './pin-connections.ts'
 
 const nodeTypes: NodeTypes = { workflow: WorkflowNode, 'runflow-group': WorkflowGroupNode, 'runflow-reroute': RerouteNode, 'runflow-subflow': SubflowNode }
 type CreatorRequest = {
@@ -50,6 +52,7 @@ type CreatorRequest = {
   nodeId?: string
   handleId?: string
   portType?: WorkflowPortType
+  disconnectOnDismiss?: PinConnectionSnapshot
 }
 function duration(execution: WorkflowExecution): string {
   if (execution.startedAt === undefined) return '-'
@@ -154,14 +157,14 @@ function NodeCreator({ request, onClose, onChoose }: {
   onClose(): void
   onChoose(type: string): void
 }) {
-  const { t } = useRunFlowLocale()
+  const { t, language } = useRunFlowLocale()
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   const [scope, setScope] = useState<NodeSearchScope>('all')
   const [favorites, setFavorites] = useState(favoriteNodeTypes)
   const nodeCatalog = useFlowStore(state => state.nodeCatalog)
   const inputRef = useRef<HTMLInputElement>(null)
-  useEffect(() => inputRef.current?.focus(), [])
+  const dialogRef = useDialogFocus(true, onClose)
   const recent = recentNodeTypes()
   const compatibleItems = nodeCatalog.filter(item => {
     if (item.available === false) return false
@@ -186,8 +189,9 @@ function NodeCreator({ request, onClose, onChoose }: {
   const categories = (Object.keys(CATEGORY_LABELS) as NodeCategory[]).filter(category => compatibleItems.some(item => item.category === category))
   return <>
     <button className="creator-scrim" onClick={onClose} aria-label="Close node creator" />
-    <section className="node-creator node-search-browser" style={{ left: Math.max(68, left - 180), top: Math.max(54, top) }} role="dialog" aria-modal="true" aria-label="Add a node">
+    <section ref={dialogRef} tabIndex={-1} className="node-creator node-search-browser" style={{ left: Math.max(68, left - 180), top: Math.max(54, top) }} role="dialog" aria-modal="true" aria-label="Add a node">
       <header><div><strong>{request.portType === undefined ? t('whatNext') : t('compatibleNode')}</strong>{request.portType !== undefined && <span>{request.direction === 'source' ? t('input') : t('outputs')} <em>{request.portType}</em></span>}</div><button onClick={onClose} aria-label={t('close')}><X size={16} /></button></header>
+      {(request.disconnectOnDismiss?.edges.length ?? 0) > 0 && <p className="node-creator-disconnect-hint" role="status">{language === 'zh' ? `关闭且不选择节点，将断开此引脚原有的 ${request.disconnectOnDismiss!.edges.length} 条连接。` : `Dismiss without choosing to disconnect this pin’s ${request.disconnectOnDismiss!.edges.length} existing connection(s).`}</p>}
       <div className="node-search-layout">
         <aside aria-label="Node categories">
           <button className={scope === 'all' ? 'active' : ''} onClick={() => setScope('all')}><Workflow size={14} />{t('allNodes')}<span>{compatibleItems.length}</span></button>
@@ -197,7 +201,7 @@ function NodeCreator({ request, onClose, onChoose }: {
           {categories.map(category => <button className={scope === category ? 'active' : ''} key={category} onClick={() => setScope(category)}><NodeIcon name={category === 'ai' ? 'bot' : category === 'logic' ? 'git-branch' : 'workflow'} />{CATEGORY_LABELS[category]}<span>{compatibleItems.filter(item => item.category === category).length}</span></button>)}
         </aside>
         <main>
-          <label><Search size={16} /><input ref={inputRef} value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => {
+          <label><Search size={16} /><input ref={inputRef} data-dialog-autofocus value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => {
             if (event.key === 'Escape') { event.preventDefault(); onClose() }
             if (event.key === 'ArrowDown') { event.preventDefault(); setActiveIndex(value => Math.min(items.length - 1, value + 1)) }
             if (event.key === 'ArrowUp') { event.preventDefault(); setActiveIndex(value => Math.max(0, value - 1)) }
@@ -223,6 +227,18 @@ function NodeCreator({ request, onClose, onChoose }: {
           </>}
         </section>
       </div>
+    </section>
+  </>
+}
+
+function PinContextMenu({ x, y, snapshot, onDisconnect, onClose }: { x: number; y: number; snapshot: PinConnectionSnapshot; onDisconnect(): void; onClose(): void }) {
+  const { t, language } = useRunFlowLocale()
+  const menuRef = useDialogFocus(true, onClose)
+  const count = snapshot.edges.length
+  return <>
+    <button className="canvas-menu-scrim" onClick={onClose} aria-label={t('close')} />
+    <section ref={menuRef} tabIndex={-1} className="canvas-context-menu pin-context-menu" role="menu" aria-label={language === 'zh' ? '引脚连接' : 'Pin connections'} style={{ left: Math.max(8, Math.min(x, window.innerWidth - 266)), top: Math.max(8, Math.min(y, window.innerHeight - 78)) }}>
+      <button role="menuitem" className="danger" data-pin-disconnect disabled={count === 0} onClick={onDisconnect}><Trash2 size={15} /><span>{language === 'zh' ? `断开 ${count} 条连接` : `Disconnect ${count} connection(s)`}</span><kbd>Del</kbd></button>
     </section>
   </>
 }
@@ -330,6 +346,14 @@ function CanvasEditor() {
   }, [graphIdentity, nodesInitialized, viewportInitialized, fitView])
   const [creator, setCreator] = useState<CreatorRequest>()
   const [menu, setMenu] = useState<CanvasMenuState>()
+  const [pinMenu, setPinMenu] = useState<{ x: number; y: number; snapshot: PinConnectionSnapshot }>()
+  const canvasRef = useRef<HTMLElement>(null)
+  const hoveredPin = useRef<ReturnType<typeof pinAtElement>>()
+  const connectionOrigin = useRef<PinConnectionSnapshot>()
+  useEffect(() => {
+    setCreator(undefined); setPinMenu(undefined)
+    hoveredPin.current = undefined; connectionOrigin.current = undefined
+  }, [graphIdentity])
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [inspectorOpen, setInspectorOpen] = useState(true)
   const [inspectorFrozen, setInspectorFrozen] = useState<boolean>()
@@ -373,7 +397,30 @@ function CanvasEditor() {
   const point = (event: MouseEvent | TouchEvent) => 'clientX' in event
     ? { x: event.clientX, y: event.clientY }
     : { x: event.changedTouches[0]?.clientX ?? 0, y: event.changedTouches[0]?.clientY ?? 0 }
+  const disconnectCapturedPin = (snapshot: PinConnectionSnapshot): void => {
+    const state = useFlowStore.getState()
+    const ids = capturedPinEdgeIds(snapshot, JSON.stringify([state.workflowId, state.activeSubflowId]), state.edges)
+    if (ids.length > 0) state.onEdgesChange(ids.map(id => ({ id, type: 'remove' as const })))
+  }
+  const dismissCreator = (): void => {
+    if (creator?.disconnectOnDismiss !== undefined) disconnectCapturedPin(creator.disconnectOnDismiss)
+    setCreator(undefined)
+  }
+  const disconnectPinForKey = (event: KeyboardEvent): boolean => {
+    if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey
+      || (event.key !== 'Delete' && event.key !== 'Backspace')
+      || isEditableEventTarget(event.target) || isEditableEventTarget(document.activeElement)
+      || creator !== undefined || pinMenu !== undefined || commandPaletteOpen) return false
+    const target = pinAtElement(event.target) ?? hoveredPin.current
+    if (target === undefined || !canvasRef.current?.contains(target.element)) return false
+    const state = useFlowStore.getState()
+    disconnectCapturedPin(capturePinConnections(state.nodes, state.edges, target.pin, JSON.stringify([state.workflowId, state.activeSubflowId])))
+    event.preventDefault(); event.stopPropagation()
+    return true
+  }
   const connectionEnd: OnConnectEnd = (event, state) => {
+    const origin = connectionOrigin.current
+    connectionOrigin.current = undefined
     gesture.current = undefined; setInspectorFrozen(undefined)
     if (!state.fromNode) return
     if (state.isValid === true) { setConnectionFeedback(undefined); return }
@@ -393,7 +440,8 @@ function CanvasEditor() {
       ? from?.data.outputs.find(item => item.id === state.fromHandle.id)
       : from?.data.inputs.find(item => item.id === state.fromHandle.id)
     const flow = screenToFlowPosition(p)
-    setCreator({ clientX: p.x, clientY: p.y, flowX: flow.x, flowY: flow.y, direction, nodeId: state.fromNode.id, ...(state.fromHandle.id == null ? {} : { handleId: state.fromHandle.id }), ...(port === undefined ? {} : { portType: port.type }) })
+    const matchingOrigin = origin?.pin.nodeId === state.fromNode.id && origin.pin.type === direction && origin.pin.handleId === (state.fromHandle.id ?? null)
+    setCreator({ clientX: p.x, clientY: p.y, flowX: flow.x, flowY: flow.y, direction, nodeId: state.fromNode.id, ...(state.fromHandle.id == null ? {} : { handleId: state.fromHandle.id }), ...(port === undefined ? {} : { portType: port.type }), ...(matchingOrigin ? { disconnectOnDismiss: origin } : {}) })
   }
   const openCreatorAt = (clientX: number, clientY: number, flowPosition?: { x: number; y: number }): void => {
     const flow = flowPosition ?? screenToFlowPosition({ x: clientX, y: clientY })
@@ -418,6 +466,7 @@ function CanvasEditor() {
   }
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || disconnectPinForKey(event)) return
       const command = commandForKeyboardEvent(event)
       if (command === undefined) return
       event.preventDefault()
@@ -441,7 +490,19 @@ function CanvasEditor() {
     setInspectorOpen(true)
   }
   return <div className="editor-workspace">
-    <main className="canvas-column" onContextMenu={event => event.preventDefault()} onPointerDownCapture={event => {
+    <main ref={canvasRef} className="canvas-column" onKeyDownCapture={event => {
+      if (disconnectPinForKey(event.nativeEvent)) { event.preventDefault(); event.stopPropagation() }
+    }} onContextMenuCapture={event => {
+      const target = pinAtElement(event.target)
+      if (target === undefined) return
+      event.preventDefault(); event.stopPropagation()
+      if (suppressContextMenu.current) return
+      const state = useFlowStore.getState()
+      setCreator(undefined); setMenu(undefined)
+      setPinMenu({ x: event.clientX, y: event.clientY, snapshot: capturePinConnections(state.nodes, state.edges, target.pin, JSON.stringify([state.workflowId, state.activeSubflowId])) })
+    }} onContextMenu={event => event.preventDefault()} onPointerOverCapture={event => {
+      hoveredPin.current = pinAtElement(event.target)
+    }} onPointerLeave={() => { hoveredPin.current = undefined }} onPointerDownCapture={event => {
       if (event.button === 2) rightGesture.current = { x: event.clientX, y: event.clientY, moved: false }
     }} onPointerMoveCapture={event => {
       const gesture = rightGesture.current
@@ -476,7 +537,11 @@ function CanvasEditor() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={connectNodes}
-        onConnectStart={() => { gesture.current = 'connection'; setInspectorFrozen(showInspector); setConnectionFeedback(undefined) }}
+        onConnectStart={(_event, params) => {
+          gesture.current = 'connection'; setInspectorFrozen(showInspector); setConnectionFeedback(undefined)
+          const state = useFlowStore.getState()
+          connectionOrigin.current = params.nodeId === null || params.handleType === null ? undefined : capturePinConnections(state.nodes, state.edges, { nodeId: params.nodeId, handleId: params.handleId, type: params.handleType }, JSON.stringify([state.workflowId, state.activeSubflowId]))
+        }}
         onConnectEnd={connectionEnd}
         connectionLineComponent={ConnectionLine}
         onDragOver={event => {
@@ -509,7 +574,7 @@ function CanvasEditor() {
         onSelectionChange={selectionChange}
         onNodeDoubleClick={(_event, node) => { if (node.type === 'runflow-subflow') enterSubflow(node.id); else if (node.data.executionRecord !== undefined) openNodeDetails(node.id) }}
         onNodeClick={(_event, node) => { selectNode(node.id); setInspectorOpen(true) }}
-        onPaneClick={() => { selectNode(); setCreator(undefined); setConnectionFeedback(undefined) }}
+        onPaneClick={() => { selectNode(); dismissCreator(); setPinMenu(undefined); setConnectionFeedback(undefined) }}
         onPaneContextMenu={event => {
           event.preventDefault()
           if (suppressContextMenu.current) return
@@ -555,7 +620,8 @@ function CanvasEditor() {
         selectNode()
       }} />
       <ExecutionDock />
-      {creator !== undefined && <NodeCreator request={creator} onClose={() => setCreator(undefined)} onChoose={choose} />}
+      {creator !== undefined && <NodeCreator request={creator} onClose={dismissCreator} onChoose={choose} />}
+      {pinMenu !== undefined && <PinContextMenu {...pinMenu} onDisconnect={() => { disconnectCapturedPin(pinMenu.snapshot); setPinMenu(undefined) }} onClose={() => setPinMenu(undefined)} />}
       {menu !== undefined && <CanvasContextMenu menu={menu} canPaste={(graphClipboard?.nodes.length ?? 0) > 0} canUndo={graphHistory.past.length > 0} canRedo={graphHistory.future.length > 0} onClose={() => setMenu(undefined)} onCommand={executeCommand} onAddNode={() => openCreatorAt(menu.x, menu.y, { x: menu.flowX, y: menu.flowY })} {...(menu.edgeId === undefined ? {} : { onReroute: () => insertReroute(menu.edgeId!, { x: menu.flowX, y: menu.flowY }) })} />}
       <CommandPalette open={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} onCommand={executeCommand} />
     </main>

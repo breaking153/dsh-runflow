@@ -50,9 +50,13 @@ Trigger B ──flow──┘      └──body──→ input
 Text Value ──value──→ HTTP 的 URL 属性输入
 ```
 
-多个 Trigger 可以连接同一个 flow 输入，每次到达独立调用共用操作。需要等待并行分支时，使用明确的 `control.join`；数据输入仍遵守单值或多值约束。
+所有执行模式都允许不同来源连接同一个 flow 输入，连接不会自动切换模式。Blueprint 中每次到达独立调用共用操作；旧 DAG 仍按拓扑顺序执行一次，旧状态图仍在同一轮执行一次。兼容模式的 flow 输入声明 `multiple: false` 时取该轮最后一个值，`multiple: true` 时保留聚合。需要在 Blueprint 中等待同一次调用的并行分支时，使用明确的 `control.join`。
+
+数据输入仍遵守单值或多值约束。同一对源、目标引脚的重复连线会被画布与 Host 拒绝。
 
 **把属性转为输入（Promote）**：选中节点，在属性旁点击“转为输入”，再连接类型匹配的数据输出。未连接时使用保存的默认值；连接后使用当前调用的数据。“还原属性”会恢复普通配置，相关引脚和连线支持一起撤销。
+
+**断开引脚连线**：将鼠标移到引脚上或让引脚获得焦点，按 Delete / Backspace；也可以右键引脚，选择“断开 N 条连接”。这会一次断开该引脚的全部连线，保留引脚和 Promote 的默认值，并可一次撤销。从已连接引脚拖到空白处后，关闭或取消节点选择器会断开原有连线；选择新节点会保留原线并追加连接，拖到不兼容目标不会删除原线。
 
 ![将 HTTP URL 属性转为输入，并连接纯文本值](./docs/assets/screenshots/property-inputs.png)
 
@@ -117,6 +121,8 @@ pnpm --dir "$env:USERPROFILE\.dsh\profiles\web" run web
 执行记录提供节点状态、耗时、输入、命名输出、日志、结构化错误和产物。端口预览适合快速检查值，Details 面板用于展开完整数据。状态图还保留步骤与共享状态证据。
 
 `PAUSED` 表示等待明确的恢复值。恢复 `control.interrupt` 使用冻结的 Workflow 定义；读取、取消和恢复执行均检查所属 Agent。Agent 节点的 Provider、Model 和支持的选项来自实时 Host，不支持的 capability 会明确报错。
+
+Agent 的 Model Provider、Model ID 和 Reasoning Effort 使用 Host 官方模型目录提供的下拉选项。留空表示运行时继承父 Agent / 模型默认设置，界面显示的当前值不会写进工作流；切换 Provider 会清除旧 Model 和 Reasoning Effort，切换 Model 会清除旧 Reasoning Effort。自定义值及目录中已不存在的历史值会明确显示并保留。HTTP Method 包含 `PATCH`、`HEAD`、`OPTIONS`；条件选项按节点 schema 展示，包含 `lessThan`。详见[节点复用与配置说明](./docs/BLUEPRINT_EXECUTION_GUIDE.md#模型与枚举配置)。
 
 ## 扩展节点与脚本
 

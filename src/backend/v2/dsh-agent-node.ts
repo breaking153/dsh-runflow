@@ -64,7 +64,11 @@ function outputSchema(config: JsonObject): ObjectJsonSchema | undefined {
 
 function toolFilter(config: JsonObject): ToolRestriction | undefined {
   const record = configRecord(config, 'toolFilter')
-  const allow = optionalStringList(record?.['allow'] ?? config['toolAllow'], 'DSH Agent config.toolFilter.allow')
+  const allowValue = record?.['allow'] ?? config['toolAllow']
+  // An explicit empty allow list denies every global tool; empty editor text stays unset.
+  const allow = Array.isArray(allowValue) && allowValue.length === 0
+    ? []
+    : optionalStringList(allowValue, 'DSH Agent config.toolFilter.allow')
   const deny = optionalStringList(record?.['deny'] ?? config['toolDeny'], 'DSH Agent config.toolFilter.deny')
   return allow === undefined && deny === undefined ? undefined : {
     ...(allow === undefined ? {} : { allow }),

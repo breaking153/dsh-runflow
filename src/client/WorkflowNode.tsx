@@ -8,6 +8,7 @@ import { NodeIcon } from './catalog.tsx'
 import { useRunFlowLocale, type RunFlowLocaleKey } from './locale.ts'
 import { PORT_COLORS } from './port-presentation.ts'
 import type { EditorPortDescriptor } from './property-ports.ts'
+import { pinAtElement } from './pin-connections.ts'
 
 const statusCopy: Record<FlowNode['data']['status'], RunFlowLocaleKey> = {
   WAITING: 'ready', RUNNING: 'running', SUCCESS: 'success',
@@ -55,13 +56,17 @@ export const PortRow = memo(function PortRow({ nodeId, port, direction, value }:
   }
   const target = direction === 'input'
   return (
-    <div className={'port-row port-' + direction + ' port-type-' + port.type} style={{ '--port-color': PORT_COLORS[port.type] } as CSSProperties} onMouseEnter={startPreview} onMouseLeave={stopPreview}>
+    <div className={'port-row port-' + direction + ' port-type-' + port.type} style={{ '--port-color': PORT_COLORS[port.type] } as CSSProperties} onMouseEnter={startPreview} onMouseLeave={stopPreview} onClick={event => { if (pinAtElement(event.target) !== undefined) event.stopPropagation() }}>
       <Handle
         className={(port.type === 'flow' ? 'flow-pin' : 'data-pin') + (connections.length > 0 ? ' connected' : '')}
         id={port.id}
         type={target ? 'target' : 'source'}
         position={target ? Position.Left : Position.Right}
         aria-label={(target ? t('input') : t('outputs')) + ' ' + port.id + ' · ' + port.type}
+        tabIndex={0}
+        aria-keyshortcuts="Delete Backspace"
+        title={language === 'zh' ? '拖动连接；Delete 或右键断开此引脚的连接' : 'Drag to connect; Delete or right-click to disconnect this pin'}
+        onMouseDown={event => { if (event.button === 0) event.currentTarget.focus({ preventScroll: true }) }}
         isConnectable={port.unavailable !== true}
       >{port.type === 'flow' && <span className="pin-core" aria-hidden="true" />}</Handle>
       <button

@@ -151,6 +151,11 @@ svg.react-flow__connectionline { z-index: 1001; overflow: visible; position: abs
 .output-column .port-button em { margin-left: 0; margin-right: auto; }
 .port-button:hover { background: #ffffff08; color: #fff; }
 .port-button:focus-visible { outline-offset: -3px; }
+.react-flow__handle:focus-visible { outline: 2px solid var(--rf-ink, #e8f0fc); outline-offset: 4px; }
+.pin-context-menu { width: 258px; }
+.node-creator-disconnect-hint { margin: 0; padding: 8px 14px; border-bottom: 1px solid var(--rf-line); color: var(--rf-muted); font-size: 11px; line-height: 1.5; }
+.property-custom-option { display: grid; gap: 6px; margin-top: 8px; }
+.property-custom-option small { color: var(--rf-muted); font-size: 11px; line-height: 1.5; }
 .workflow-node .react-flow__handle { top: 50%; width: 14px; height: 14px; border: 0; border-radius: 0; background: transparent; transform: translateY(-50%); z-index: 5; pointer-events: all; cursor: crosshair; }
 .workflow-node .react-flow__handle-left { left: -7px; }
 .workflow-node .react-flow__handle-right { right: -7px; }

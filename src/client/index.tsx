@@ -165,7 +165,8 @@ function FlowLauncher({ wide }: FlowLauncherProps) {
 }
 
 export const name = 'dsh-runflow-client'
-export const inject = ['slots', 'sessions', 'modelDirectories', 'remote', 'locale']
+// directoryFor resolves remote.session through the consuming Cordis context.
+export const inject = ['slots', 'sessions', 'modelDirectories', 'remote', 'remote.session', 'locale']
 
 export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
   const disconnectLocale = connectFlowLocale(ctx)

@@ -93,7 +93,7 @@ function nodeInput(provider: WorkflowNodeDefinition, messages: WorkflowActivatio
     if (id === undefined) continue
     const descriptor = descriptors.find(port => port.id === id)
     const multiple = descriptor?.multiple === true && (!blueprint || descriptor.type !== 'flow' || provider.activation === 'all')
-    if (own(ports, id) && !multiple) throw new WorkflowExecutionError('Input port ' + id + ' received multiple messages; use a multiple input or Join node', 'FLOW_INPUT_CARDINALITY')
+    if (own(ports, id) && !multiple && descriptor?.type !== 'flow') throw new WorkflowExecutionError('Input port ' + id + ' received multiple messages; use a multiple input or Join node', 'FLOW_INPUT_CARDINALITY')
     if (multiple) {
       const current = ports[id]
       ports[id] = [...(Array.isArray(current) ? current : []), clone(activation.value)]

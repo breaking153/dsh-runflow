@@ -48,6 +48,14 @@ function outputPorts(provider: WorkflowNodeDefinition | undefined): WorkflowPort
   return provider?.outputs === undefined ? [LEGACY_OUTPUT] : provider.outputs
 }
 
+function duplicateEdgeIssue(edge: WorkflowEdge, sourceId = edge.sourcePort, targetId = edge.targetPort): WorkflowValidationIssue {
+  return {
+    code: 'DUPLICATE_EDGE', nodeId: edge.to,
+    message: 'Duplicate connection from ' + edge.from + '.' + (sourceId ?? '(default)')
+      + ' to ' + edge.to + '.' + (targetId ?? '(default)'),
+  }
+}
+
 export function validateWorkflow(
   definition: WorkflowDefinition,
   resolveNode?: (type: string) => WorkflowNodeDefinition | undefined,
@@ -69,7 +77,13 @@ export function validateWorkflow(
       issues.push({ code: 'INVALID_PROPERTY', message: 'Invalid promoted property paths on node ' + node.id, nodeId: node.id })
     }
   }
+  const literalEdges = new Set<string>()
   for (const edge of definition.edges) {
+    // Even callers without a resolver can reject exact duplicates. Missing
+    // handles stay missing here; their actual defaults require provider metadata.
+    const key = JSON.stringify([edge.from, edge.sourcePort ?? null, edge.to, edge.targetPort ?? null])
+    if (literalEdges.has(key)) issues.push(duplicateEdgeIssue(edge))
+    else literalEdges.add(key)
     if (!ids.has(edge.from)) {
       issues.push({ code: 'MISSING_NODE', message: 'Edge source does not exist: ' + edge.from, nodeId: edge.from })
     }
@@ -109,6 +123,7 @@ export function validateWorkflow(
     }
     if (issues.length > 0) return issues
     const incomingCounts = new Map<string, number>()
+    const resolvedEdges = new Set<string>()
     for (const edge of definition.edges) {
       const sourceNode = nodes.get(edge.from)
       const targetNode = nodes.get(edge.to)
@@ -121,6 +136,11 @@ export function validateWorkflow(
       const targetId = edge.targetPort ?? targetDescriptors[0]?.id
       const source = sourceDescriptors.find(port => port.id === sourceId)
       const target = targetDescriptors.find(port => port.id === targetId)
+      if (sourceProvider !== undefined && targetProvider !== undefined && source !== undefined && target !== undefined) {
+        const key = JSON.stringify([edge.from, source.id, edge.to, target.id])
+        if (resolvedEdges.has(key)) issues.push(duplicateEdgeIssue(edge, source.id, target.id))
+        else resolvedEdges.add(key)
+      }
       if (source === undefined) {
         issues.push({
           code: 'UNKNOWN_PORT',
@@ -149,7 +169,7 @@ export function validateWorkflow(
         const key = edge.to + ':' + target.id
         const count = (incomingCounts.get(key) ?? 0) + 1
         incomingCounts.set(key, count)
-        if (count > 1 && target.multiple !== true && !(target.type === 'flow' && definition.execution?.semantics === 'blueprint')
+        if (count > 1 && target.multiple !== true && target.type !== 'flow'
           && (definition.execution?.mode !== 'state-graph' || definition.execution?.semantics === 'blueprint' || target.configKey !== undefined)) {
           issues.push({
             code: 'PORT_CARDINALITY',

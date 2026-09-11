@@ -3,6 +3,7 @@ import { Grip, Maximize2, MessageSquare, Minimize2, X } from 'lucide-react'
 import { FlowApp } from './App.tsx'
 import { RunFlowMark } from './RunFlowLogo.tsx'
 import { useRunFlowLocale } from './locale.ts'
+import { hasActiveDialogWithin } from './use-dialog-focus.ts'
 
 export type RunFlowWindowMode = 'floating' | 'maximized'
 
@@ -164,7 +165,8 @@ export function FloatingRunFlowWindow({ mode, closing, onMinimize, onToggleMaxim
     aria-label="DSH RunFlow"
     tabIndex={-1}
     onKeyDown={event => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !event.defaultPrevented && !event.nativeEvent.isComposing && !hasActiveDialogWithin(event.currentTarget)) {
+        event.preventDefault()
         event.stopPropagation()
         onMinimize()
       }
